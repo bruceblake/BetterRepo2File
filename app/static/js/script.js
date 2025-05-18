@@ -38,6 +38,7 @@ class WorkflowController {
         document.getElementById('generateCoderContextBtn')?.addEventListener('click', () => this.generateCoderContext());
         document.getElementById('generateIterationBtn')?.addEventListener('click', () => this.generateIteration());
         document.getElementById('refinePromptBtn')?.addEventListener('click', () => this.refinePrompt());
+        document.getElementById('generateCoderContextIterationBtn')?.addEventListener('click', () => this.generateIterationCoderContext());
         
         // Input listeners
         document.getElementById('githubUrlInputRepo')?.addEventListener('input', (e) => {
@@ -220,9 +221,13 @@ class WorkflowController {
             return;
         }
         
-        this.showProgress('Analyzing changes and generating iteration context...');
+        // Store feedback for later use
+        this.state.feedbackText = feedbackText;
+        
+        this.showProgress('Generating context for Gemini re-planning...');
         
         try {
+            // First, generate context for Gemini to re-plan based on feedback
             const response = await fetch('/api/generate_context', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -230,8 +235,9 @@ class WorkflowController {
                     repo_url: this.state.repoUrl,
                     repo_branch: this.state.branch,
                     vibe: this.state.vibe,
-                    stage: 'C',
+                    stage: 'C',  // Stage C for iteration
                     feedback_log: feedbackText,
+                    previous_planner_output: this.state.plannerOutput,
                     session_id: this.state.sessionId
                 })
             });
@@ -282,31 +288,77 @@ class WorkflowController {
     
     displayResults(result) {
         if (this.state.currentStep === 1) {
-            // Show Section A output
+            // Show Section A output for initial planning
             const output = document.getElementById('sectionAOutput');
             if (output) {
                 output.textContent = result.copy_text || 'No content generated';
             }
             this.showStep(2);
         } else if (this.state.currentStep === 3) {
-            // Show Section B output
+            // Show Section B output for initial coding
             const output = document.getElementById('sectionBOutput');
             if (output) {
                 output.textContent = result.copy_text || 'No content generated';
             }
             this.showStep(4);
         } else if (this.state.currentStep === 5) {
-            // Show iteration output
-            const output = document.getElementById('sectionBOutput');
+            // Show iteration output for Gemini re-planning
+            const output = document.getElementById('iterationPlannerOutput');
             if (output) {
                 output.textContent = result.copy_text || 'No content generated';
             }
-            this.showStep(4);
+            this.showStep(6);  // Go to iteration planning step
             
             // Show recent diff if available
             if (result.diff) {
                 this.displayDiff(result.diff);
             }
+        } else if (this.state.currentStep === 7) {
+            // Show iteration coding output for Claude
+            const output = document.getElementById('iterationCoderOutput');
+            if (output) {
+                output.textContent = result.copy_text || 'No content generated';
+            }
+            this.showStep(8);  // Go to iteration coding step
+        }
+    }
+    
+    async generateIterationCoderContext() {
+        const iterationPlannerInput = document.getElementById('iterationPlannerInput').value;
+        if (!iterationPlannerInput) {
+            alert('Please paste Gemini\'s updated planning output first');
+            return;
+        }
+        
+        this.state.iterationPlannerOutput = iterationPlannerInput;
+        this.showProgress('Generating implementation context for Claude...');
+        
+        try {
+            const response = await fetch('/api/generate_context', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    repo_url: this.state.repoUrl,
+                    repo_branch: this.state.branch,
+                    vibe: this.state.vibe,
+                    stage: 'D',  // New stage for iteration coding
+                    planner_output: iterationPlannerInput,
+                    feedback_log: this.state.feedbackText,
+                    original_planner_output: this.state.plannerOutput
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                this.state.jobId = result.job_id;
+                await this.pollJob();
+            } else {
+                throw new Error(result.error || 'Failed to generate context');
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+            this.hideProgress();
         }
     }
     
@@ -490,12 +542,12 @@ function displayCommitHistory(commits) {
 }
 
 // Utility Functions
-function copyToClipboard(elementId) {
+function copyToClipboard(elementId, buttonElement) {
     const element = document.getElementById(elementId);
     if (element) {
         const text = element.textContent;
         navigator.clipboard.writeText(text).then(() => {
-            const btn = event.target;
+            const btn = buttonElement;
             const originalText = btn.textContent;
             btn.textContent = 'Copied!';
             btn.style.background = '#10b981';

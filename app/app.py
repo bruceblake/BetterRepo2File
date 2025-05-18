@@ -146,7 +146,13 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
         
         # Build repo2file command based on stage
         # Run as module to handle relative imports correctly
-        cmd = [sys.executable, '-m', 'repo2file.dump_ultra']
+        # Use the virtual environment Python if available
+        venv_python = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'venv', 'bin', 'python')
+        if os.path.exists(venv_python):
+            python_executable = venv_python
+        else:
+            python_executable = sys.executable
+        cmd = [python_executable, '-m', 'repo2file.dump_ultra']
         
         # Add repository path as the first positional argument
         if repo_path:
@@ -172,6 +178,8 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
             with open(planner_file, 'w') as f:
                 f.write(planner_output)
             cmd.extend(['--planner', planner_file])
+            # Claude has a smaller context window (~100k tokens)
+            cmd.extend(['--budget', '90000'])
         
         elif stage == 'C':
             # Stage C uses iteration mode - rebuild command differently

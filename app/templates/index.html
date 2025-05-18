@@ -116,7 +116,7 @@
                         <div class="output-section">
                             <div class="output-header">
                                 <h4>Context for Gemini</h4>
-                                <button class="copy-btn" onclick="copyToClipboard('sectionAOutput')">Copy</button>
+                                <button class="copy-btn" onclick="copyToClipboard('sectionAOutput', this)">Copy</button>
                             </div>
                             <div class="output-preview" id="sectionAOutput"></div>
                         </div>
@@ -170,7 +170,7 @@
                         <div class="output-section">
                             <div class="output-header">
                                 <h4>Context for Claude</h4>
-                                <button class="copy-btn" onclick="copyToClipboard('sectionBOutput')">Copy</button>
+                                <button class="copy-btn" onclick="copyToClipboard('sectionBOutput', this)">Copy</button>
                             </div>
                             <div class="output-preview" id="sectionBOutput"></div>
                         </div>
@@ -222,7 +222,64 @@
                             <button class="secondary-btn" onclick="window.workflow.showStep(4)">Back</button>
                             <button id="generateIterationBtn" class="primary-btn">
                                 <span class="material-symbols-outlined">update</span>
-                                Generate Update
+                                Generate Iteration Context
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Iteration Planning (Gemini) -->
+                <div class="step-card hidden" id="stepIterationPlanning">
+                    <div class="step-header">
+                        <h3>Iteration Planning</h3>
+                        <p>Gemini will re-plan based on your feedback</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="output-section">
+                            <div class="output-header">
+                                <h4>Context for Gemini (Iteration)</h4>
+                                <button class="copy-btn" onclick="copyToClipboard('iterationPlannerOutput', this)">Copy</button>
+                            </div>
+                            <div class="output-preview" id="iterationPlannerOutput"></div>
+                        </div>
+                        
+                        <div class="divider"></div>
+                        
+                        <div class="form-group">
+                            <label>Paste Gemini's Updated Planning Output</label>
+                            <textarea id="iterationPlannerInput" placeholder="Paste the Gemini planning output here..." rows="4"></textarea>
+                        </div>
+                        
+                        <div class="action-buttons">
+                            <button class="secondary-btn" onclick="window.workflow.showStep(5)">Back</button>
+                            <button id="generateCoderContextIterationBtn" class="primary-btn">
+                                <span class="material-symbols-outlined">code</span>
+                                Generate Claude Context
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Iteration Coding (Claude) -->
+                <div class="step-card hidden" id="stepIterationCoding">
+                    <div class="step-header">
+                        <h3>Iteration Coding</h3>
+                        <p>Claude will implement the updated plan</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="output-section">
+                            <div class="output-header">
+                                <h4>Context for Claude (Iteration)</h4>
+                                <button class="copy-btn" onclick="copyToClipboard('iterationCoderOutput', this)">Copy</button>
+                            </div>
+                            <div class="output-preview" id="iterationCoderOutput"></div>
+                        </div>
+                        
+                        <div class="action-buttons">
+                            <button class="secondary-btn" onclick="window.workflow.showStep(6)">Back</button>
+                            <button class="primary-btn" onclick="window.workflow.showStep(4)">
+                                <span class="material-symbols-outlined">check</span>
+                                Back to Testing
                             </button>
                         </div>
                     </div>
