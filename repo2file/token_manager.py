@@ -49,7 +49,11 @@ class TokenManager:
     def __init__(self, model: str = "gpt-4", budget: int = 500000):
         self.model = model
         try:
-            self.encoder = tiktoken.encoding_for_model(model)
+            # Special case for Gemini models which use the same encoding as GPT-4
+            if model.startswith('gemini'):
+                self.encoder = tiktoken.get_encoding("cl100k_base")
+            else:
+                self.encoder = tiktoken.encoding_for_model(model)
         except:
             # Fallback to cl100k_base encoding
             self.encoder = tiktoken.get_encoding("cl100k_base")

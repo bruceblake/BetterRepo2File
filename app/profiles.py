@@ -25,6 +25,8 @@ class ProcessingProfile:
     priority_patterns: Dict[str, float] = field(default_factory=dict)
     max_file_size: int = 1_000_000  # 1MB
     use_gitignore: bool = True
+    truncation_strategy: str = "semantic"  # For ultra mode
+    generate_manifest: bool = False  # For ultra mode
     
     def to_dict(self) -> Dict:
         """Convert to dictionary"""
@@ -123,6 +125,19 @@ DEFAULT_PROFILES = {
         token_budget=750000,
         exclude_patterns=['**/node_modules/', '**/target/', '**/build/'],
         priority_patterns={'**/api/**': 0.9, '**/services/**': 0.8, 'docker-compose*': 0.7}
+    ),
+    
+    'gemini': ProcessingProfile(
+        name='gemini',
+        description='Optimized for Gemini 1.5 Pro with large context window',
+        mode='ultra',
+        model='gemini-1.5-pro',
+        token_budget=1000000,  # 1M tokens for Gemini's large context
+        file_extensions=[],  # Include all by default  
+        exclude_patterns=['node_modules/', '__pycache__/', 'venv/', '.git/', 'dist/', 'build/'],
+        priority_patterns={'**/README*': 1.0, '**/index.*': 0.9, '**/main.*': 0.8},
+        truncation_strategy='middle_summarize',
+        generate_manifest=True
     ),
 }
 

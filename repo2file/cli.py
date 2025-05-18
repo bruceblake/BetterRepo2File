@@ -40,14 +40,17 @@ def cli():
 @click.argument('output', type=click.Path())
 @click.option('--mode', type=click.Choice(['standard', 'smart', 'token', 'ultra']), 
               default='smart', help='Processing mode')
-@click.option('--model', default='gpt-4', help='LLM model (for ultra mode)')
+@click.option('--model', default='gpt-4', help='LLM model (for ultra mode: gpt-4, gpt-3.5-turbo, claude-3, llama, gemini-1.5-pro)')
 @click.option('--budget', type=int, default=500000, help='Token budget')
 @click.option('--profile', help='Use configuration profile')
 @click.option('--exclude', multiple=True, help='Additional exclusion patterns')
 @click.option('--file-types', multiple=True, help='File extensions to include')
 @click.option('--preview', is_flag=True, help='Preview files before processing')
 @click.option('--stats', is_flag=True, help='Show detailed statistics')
-def process(path, output, mode, model, budget, profile, exclude, file_types, preview, stats):
+@click.option('--manifest', is_flag=True, help='Generate hierarchical manifest (for ultra mode)')
+@click.option('--truncation', type=click.Choice(['semantic', 'basic', 'middle_summarize', 'business_logic']), 
+              help='Truncation strategy (for ultra mode)')
+def process(path, output, mode, model, budget, profile, exclude, file_types, preview, stats, manifest, truncation):
     """Process a repository or directory"""
     
     console.print(f"[bold blue]repo2file[/bold blue] - Processing {path}")
@@ -62,6 +65,12 @@ def process(path, output, mode, model, budget, profile, exclude, file_types, pre
     if mode == 'ultra':
         cmd = [sys.executable, '-m', 'repo2file.dump_ultra', path, output]
         cmd.extend(['--model', model, '--budget', str(budget)])
+        
+        if manifest:
+            cmd.append('--manifest')
+        
+        if truncation:
+            cmd.extend(['--truncation', truncation])
         
         for pattern in exclude:
             cmd.extend(['--exclude', pattern])
@@ -127,7 +136,7 @@ def process(path, output, mode, model, budget, profile, exclude, file_types, pre
 @click.argument('repo_url')
 @click.option('--mode', type=click.Choice(['standard', 'smart', 'token', 'ultra']), 
               default='smart', help='Processing mode')
-@click.option('--model', default='gpt-4', help='LLM model (for ultra mode)')
+@click.option('--model', default='gpt-4', help='LLM model (for ultra mode: gpt-4, gpt-3.5-turbo, claude-3, llama, gemini-1.5-pro)')
 @click.option('--budget', type=int, default=500000, help='Token budget')
 @click.option('--output', help='Output file (default: repo_name.txt)')
 def github(repo_url, mode, model, budget, output):

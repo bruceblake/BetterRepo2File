@@ -1,3 +1,7 @@
+// Virtual scrolling configuration
+const VIRTUAL_SCROLL_THRESHOLD = 5000000; // 5MB
+const CHUNK_SIZE = 100000; // 100KB chunks
+
 document.addEventListener('DOMContentLoaded', function() {
     // Elements
     const tabBtns = document.querySelectorAll('.tab-btn');
@@ -238,8 +242,27 @@ document.addEventListener('DOMContentLoaded', function() {
             // Store the operation ID for download
             currentOperationId = data.operation_id;
             
-            // Display the output
-            outputContent.textContent = data.content;
+            // Display the output with handling for large content
+            if (data.content.length > 100000) {
+                // For very large outputs, provide progressive loading feedback
+                outputContent.textContent = 'Loading large output...';
+                
+                // Use setTimeout to let the UI update before setting the large content
+                setTimeout(() => {
+                    outputContent.textContent = data.content;
+                    
+                    // Add a warning about large content
+                    const warningDiv = document.createElement('div');
+                    warningDiv.className = 'large-content-warning';
+                    warningDiv.innerHTML = `
+                        <p>⚠️ Large output detected (${(data.content.length / 1024 / 1024).toFixed(2)} MB)</p>
+                        <p>The browser may be slow to respond. Consider using the Download option for better performance.</p>
+                    `;
+                    outputContent.parentElement.insertBefore(warningDiv, outputContent);
+                }, 100);
+            } else {
+                outputContent.textContent = data.content;
+            }
             
             // Display exclusion file and mode information
             let info = [];
@@ -262,6 +285,11 @@ document.addEventListener('DOMContentLoaded', function() {
             
             outputSection.classList.remove('hidden');
             
+            // Update download button with file size
+            const fileSizeBytes = new Blob([data.content]).size;
+            const fileSizeMB = (fileSizeBytes / 1024 / 1024).toFixed(2);
+            downloadBtn.textContent = `Download (${fileSizeMB} MB)`;
+            
             // Scroll to output section
             outputSection.scrollIntoView({ behavior: 'smooth' });
         })
@@ -282,7 +310,17 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Copy button click event
     copyBtn.addEventListener('click', function() {
-        navigator.clipboard.writeText(outputContent.textContent)
+        // Handle large content copy with better error handling
+        const content = outputContent.textContent;
+        
+        if (content.length > 1000000) {
+            // For very large content, show warning
+            if (!confirm('This is a large amount of text (' + (content.length / 1024 / 1024).toFixed(2) + ' MB). Copying may take a while or fail. Continue?')) {
+                return;
+            }
+        }
+        
+        navigator.clipboard.writeText(content)
             .then(() => {
                 // Visual feedback for copy success
                 const originalText = copyBtn.textContent;
@@ -298,12 +336,23 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Download button click event
     downloadBtn.addEventListener('click', function() {
+        // Show loading state for large downloads
+        const originalText = this.textContent;
+        this.textContent = 'Preparing download...';
+        this.disabled = true;
+        
         if (!currentOperationId) {
             showError('No output available to download');
             return;
         }
         
         window.location.href = `/download/${currentOperationId}`;
+        
+        // Reset button after a short delay
+        setTimeout(() => {
+            this.textContent = originalText;
+            this.disabled = false;
+        }, 2000);
     });
     
     // Cleanup on page unload

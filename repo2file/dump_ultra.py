@@ -34,6 +34,7 @@ MODEL_CONFIGS = {
     'gpt-3.5-turbo': {'encoding': 'cl100k_base', 'max_tokens': 16385},
     'claude-3': {'encoding': 'cl100k_base', 'max_tokens': 200000},
     'llama': {'encoding': 'cl100k_base', 'max_tokens': 32000},
+    'gemini-1.5-pro': {'encoding': 'cl100k_base', 'max_tokens': 2000000},
 }
 
 # File type configurations
@@ -88,6 +89,233 @@ SUMMARIZE_FILES = {
     'pubspec.lock', 'mix.lock', '.terraform.lock.hcl',
 }
 
+class ManifestGenerator:
+    """Generate hierarchical manifest for large contexts"""
+    
+    def __init__(self, token_manager: TokenManager, code_analyzer: CodeAnalyzer):
+        self.token_manager = token_manager
+        self.code_analyzer = code_analyzer
+    
+    def generate_manifest(self, files: List['FileInfo'], codebase_analysis: Dict, 
+                         max_tokens: int = 5000) -> Tuple[str, Dict[str, int]]:
+        """Generate a hierarchical manifest with navigation aids
+        
+        Returns:
+            manifest_text: Markdown formatted manifest
+            offset_map: Map of file paths to their token offset in the final output
+        """
+        manifest_lines = ["# Project Manifest", "", "## Table of Contents", ""]
+        offset_map = {}
+        
+        # Group files by directory/module
+        file_groups = self._group_files_by_directory(files)
+        
+        # Add overview section
+        manifest_lines.extend([
+            "### Project Overview",
+            f"- **Type**: {codebase_analysis.get('project_type', 'Unknown')}",
+            f"- **Primary Language**: {codebase_analysis.get('primary_language', 'Mixed')}",
+            f"- **Key Frameworks**: {', '.join(codebase_analysis.get('frameworks', set()))}",
+            f"- **Total Files**: {len(files)}",
+            "",
+            "### Navigation Guide",
+            "",
+            "Each section below contains:",
+            "- Module/directory purpose (when detectable)",
+            "- Key files with their main exports/classes",
+            "- Estimated token location in the output",
+            "",
+            "---",
+            ""
+        ])
+        
+        # Process each module/directory
+        for dir_path, dir_files in sorted(file_groups.items()):
+            if not dir_files:
+                continue
+                
+            # Add directory section
+            dir_name = dir_path or "Root"
+            manifest_lines.append(f"### {dir_name}")
+            
+            # Try to determine directory purpose
+            purpose = self._determine_directory_purpose(dir_path, dir_files)
+            if purpose:
+                manifest_lines.append(f"*{purpose}*")
+            
+            manifest_lines.append("")
+            
+            # Sort files by importance
+            dir_files.sort(key=lambda f: -f.importance_score)
+            
+            # Add key files
+            for file in dir_files[:10]:  # Limit to top 10 files per directory
+                rel_path = file.rel_path
+                
+                # Get file summary
+                summary = self._get_file_summary(file)
+                if summary:
+                    manifest_lines.append(f"- **{rel_path}** - {summary}")
+                else:
+                    manifest_lines.append(f"- **{rel_path}**")
+                
+                # Add key exports/classes if available
+                if file.semantic_data and 'ast_info' in file.semantic_data:
+                    entities = []
+                    for entity in file.semantic_data['ast_info'].get('entities', [])[:5]:
+                        if entity['type'] in ['class', 'function', 'export']:
+                            entities.append(f"`{entity['name']}`")
+                    
+                    if entities:
+                        manifest_lines.append(f"  - Key items: {', '.join(entities)}")
+                
+                manifest_lines.append("")
+            
+            manifest_lines.append("")
+        
+        # Add token budget information
+        manifest_lines.extend([
+            "---",
+            "",
+            "## Processing Summary",
+            "",
+            f"- **Token Budget**: {self.token_manager.budget.total:,}",
+            f"- **Tokens Used**: {self.token_manager.budget.used:,}",
+            f"- **Utilization**: {self.token_manager.budget.used/self.token_manager.budget.total*100:.1f}%",
+            "",
+            "### File Selection Strategy",
+            "",
+            "Files were prioritized based on:",
+            "1. Semantic importance (main files, configs, APIs)",
+            "2. Code complexity and entity count",
+            "3. File type and extension",
+            "4. Size optimization for token budget",
+            ""
+        ])
+        
+        manifest_text = '\n'.join(manifest_lines)
+        return manifest_text, offset_map
+    
+    def _group_files_by_directory(self, files: List['FileInfo']) -> Dict[str, List['FileInfo']]:
+        """Group files by their parent directory"""
+        groups = {}
+        for file in files:
+            parts = file.rel_path.split('/')
+            dir_path = '/'.join(parts[:-1]) if len(parts) > 1 else ''
+            
+            if dir_path not in groups:
+                groups[dir_path] = []
+            groups[dir_path].append(file)
+        
+        return groups
+    
+    def _determine_directory_purpose(self, dir_path: str, files: List['FileInfo']) -> Optional[str]:
+        """Try to determine the purpose of a directory based on its contents"""
+        if not dir_path:
+            return "Project root directory"
+        
+        dir_name = dir_path.split('/')[-1].lower()
+        file_names = [f.path.name.lower() for f in files]
+        
+        # Common directory patterns
+        patterns = {
+            'components': 'UI Components',
+            'pages': 'Application Pages/Routes',
+            'views': 'View Templates',
+            'models': 'Data Models',
+            'controllers': 'Request Controllers',
+            'services': 'Business Logic Services',
+            'utils': 'Utility Functions',
+            'helpers': 'Helper Functions',
+            'config': 'Configuration Files',
+            'api': 'API Endpoints',
+            'routes': 'Route Definitions',
+            'middleware': 'Middleware Functions',
+            'tests': 'Test Files',
+            'test': 'Test Files',
+            'spec': 'Test Specifications',
+            'docs': 'Documentation',
+            'scripts': 'Build/Utility Scripts',
+            'styles': 'Stylesheets',
+            'css': 'Stylesheets',
+            'assets': 'Static Assets',
+            'static': 'Static Files',
+            'public': 'Public Assets',
+            'lib': 'Library Code',
+            'vendor': 'Third-party Code',
+            'migrations': 'Database Migrations',
+            'fixtures': 'Test Data Fixtures',
+        }
+        
+        # Check directory name
+        for pattern, purpose in patterns.items():
+            if pattern in dir_name:
+                return purpose
+        
+        # Check file contents
+        if any('test' in name or 'spec' in name for name in file_names):
+            return 'Test Files'
+        
+        if any(name.endswith('.css') or name.endswith('.scss') for name in file_names):
+            return 'Stylesheets'
+        
+        return None
+    
+    def _get_file_summary(self, file: 'FileInfo') -> Optional[str]:
+        """Generate a brief summary of the file's purpose"""
+        filename = file.path.name.lower()
+        
+        # Special files
+        special_files = {
+            'readme.md': 'Project documentation',
+            'package.json': 'Node.js project configuration',
+            'requirements.txt': 'Python dependencies',
+            'setup.py': 'Python package setup',
+            'dockerfile': 'Docker container configuration',
+            'docker-compose.yml': 'Docker services configuration',
+            '.gitignore': 'Git ignore patterns',
+            'tsconfig.json': 'TypeScript configuration',
+            'webpack.config.js': 'Webpack bundler configuration',
+            'rollup.config.js': 'Rollup bundler configuration',
+            'vite.config.js': 'Vite bundler configuration',
+            '.eslintrc': 'ESLint configuration',
+            '.prettierrc': 'Prettier configuration',
+            'jest.config.js': 'Jest test configuration',
+            'karma.conf.js': 'Karma test configuration',
+            'babel.config.js': 'Babel transpiler configuration',
+        }
+        
+        if filename in special_files:
+            return special_files[filename]
+        
+        # Check file extension and content
+        if file.semantic_data and 'ast_info' in file.semantic_data:
+            ast_info = file.semantic_data['ast_info']
+            entity_types = [e['type'] for e in ast_info.get('entities', [])]
+            if 'class' in entity_types:
+                main_class = next((e['name'] for e in ast_info['entities'] if e['type'] == 'class'), None)
+                if main_class:
+                    return f"Contains {main_class} class"
+            
+            if len(entity_types) > 3:
+                unique_types = set(entity_types)
+                return f"Contains {len(entity_types)} {'/'.join(unique_types)}"
+        
+        # File type based summary
+        ext = file.path.suffix.lower()
+        if ext == '.py':
+            if 'main' in filename:
+                return 'Main entry point'
+            elif 'init' in filename:
+                return 'Package initializer'
+        elif ext in ['.js', '.ts']:
+            if 'index' in filename:
+                return 'Module entry point'
+            elif 'main' in filename:
+                return 'Main entry point'
+        
+        return None
+
 @dataclass
 class FileInfo:
     path: Path
@@ -114,6 +342,8 @@ class ProcessingProfile:
     priority_boost: Dict[str, float] = field(default_factory=dict)
     max_file_size: int = 1_000_000  # 1MB
     min_importance_score: float = 0.0
+    generate_manifest: bool = True  # Generate hierarchical manifest for large contexts
+    truncation_strategy: str = 'semantic'  # semantic, basic, middle_summarize, business_logic
     
     def save(self, path: Path):
         with open(path, 'w') as f:
@@ -127,11 +357,12 @@ class ProcessingProfile:
 
 class Cache:
     """File and token count caching system"""
-    def __init__(self, cache_dir: Path = CACHE_DIR):
+    def __init__(self, cache_dir: Path = CACHE_DIR, profile_key: str = None):
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(exist_ok=True)
-        self.token_cache_file = self.cache_dir / 'token_cache.json'
-        self.file_cache_file = self.cache_dir / 'file_cache.json'
+        self.profile_key = profile_key or 'default'
+        self.token_cache_file = self.cache_dir / f'token_cache_{self.profile_key}.json'
+        self.file_cache_file = self.cache_dir / f'file_cache_{self.profile_key}.json'
         self.load_caches()
     
     def load_caches(self):
@@ -153,11 +384,17 @@ class Cache:
         with open(self.file_cache_file, 'w') as f:
             json.dump(self.file_cache, f)
     
-    def get_file_hash(self, file_path: Path) -> str:
-        """Get hash of file content"""
+    def get_file_hash(self, file_path: Path, profile_hash: str = None) -> str:
+        """Get hash of file content and processing parameters"""
         stat = file_path.stat()
-        # Use file size and modification time for quick hash
-        return f"{stat.st_size}:{stat.st_mtime_ns}"
+        # Include file metadata
+        file_hash = f"{stat.st_size}:{stat.st_mtime_ns}"
+        
+        # Include processing profile in hash if provided
+        if profile_hash:
+            return hashlib.sha256(f"{file_hash}:{profile_hash}".encode()).hexdigest()
+        
+        return file_hash
     
     def get_token_count(self, content_hash: str) -> Optional[int]:
         """Get cached token count for content hash"""
@@ -167,37 +404,80 @@ class Cache:
         """Cache token count for content hash"""
         self.token_cache[content_hash] = count
     
-    def get_file_info(self, file_path: Path) -> Optional[Dict]:
-        """Get cached file info"""
+    def get_file_info(self, file_path: Path, profile_hash: str = None) -> Optional[Dict]:
+        """Get cached file info with expiration check"""
         cache_key = str(file_path)
         if cache_key in self.file_cache:
             info = self.file_cache[cache_key]
+            
+            # Check cache expiration
+            cached_time = info.get('cached_at', 0)
+            if time.time() - cached_time > (CACHE_EXPIRY_DAYS * 24 * 3600):
+                del self.file_cache[cache_key]
+                return None
+            
             # Check if cache is still valid
-            current_hash = self.get_file_hash(file_path)
+            current_hash = self.get_file_hash(file_path, profile_hash)
             if info.get('hash') == current_hash:
                 return info
+            else:
+                # Cache invalid, remove it
+                del self.file_cache[cache_key]
         return None
     
-    def set_file_info(self, file_path: Path, info: Dict):
-        """Cache file info"""
+    def set_file_info(self, file_path: Path, info: Dict, profile_hash: str = None):
+        """Cache file info with profile awareness"""
         cache_key = str(file_path)
-        info['hash'] = self.get_file_hash(file_path)
+        info['hash'] = self.get_file_hash(file_path, profile_hash)
         info['cached_at'] = time.time()
         self.file_cache[cache_key] = info
+        
+        # Periodically clean old cache entries
+        if len(self.file_cache) % 100 == 0:
+            self.clean_expired_cache()
+    
+    def clean_expired_cache(self):
+        """Remove expired cache entries"""
+        current_time = time.time()
+        expiry_time = CACHE_EXPIRY_DAYS * 24 * 3600
+        
+        # Clean token cache
+        self.token_cache = {
+            k: v for k, v in self.token_cache.items()
+            if isinstance(v, dict) and current_time - v.get('cached_at', 0) < expiry_time
+        }
+        
+        # Clean file cache
+        self.file_cache = {
+            k: v for k, v in self.file_cache.items()
+            if current_time - v.get('cached_at', 0) < expiry_time
+        }
+        
+        self.save_caches()
 
 class UltraFileScanner:
     """Advanced file scanner with caching and parallel processing"""
-    def __init__(self, cache: Cache, token_manager: TokenManager, code_analyzer: CodeAnalyzer):
+    def __init__(self, cache: Cache, token_manager: TokenManager, code_analyzer: CodeAnalyzer, profile: ProcessingProfile = None):
         self.cache = cache
         self.token_manager = token_manager
         self.code_analyzer = code_analyzer
+        self.profile = profile
         self.executor = ThreadPoolExecutor(max_workers=mp.cpu_count())
+        # Create a profile hash for cache invalidation
+        self.profile_hash = self._get_profile_hash() if profile else None
+    
+    def _get_profile_hash(self) -> str:
+        """Generate a hash of the processing profile for cache invalidation"""
+        if not self.profile:
+            return None
+        profile_str = f"{self.profile.model}:{self.profile.token_budget}:{self.profile.truncation_strategy}:{self.profile.min_importance_score}"
+        return hashlib.sha256(profile_str.encode()).hexdigest()
     
     def scan_file(self, file_path: Path, base_path: Path) -> Optional[FileInfo]:
         """Scan a single file with caching"""
         try:
-            # Check cache first
-            cached_info = self.cache.get_file_info(file_path)
+            # Check cache first with profile awareness
+            cached_info = self.cache.get_file_info(file_path, self.profile_hash)
             if cached_info:
                 return self._dict_to_fileinfo(cached_info, file_path, base_path)
             
@@ -236,8 +516,8 @@ class UltraFileScanner:
                         info.semantic_data, file_path
                     )
             
-            # Cache the result
-            self.cache.set_file_info(file_path, self._fileinfo_to_dict(info))
+            # Cache the result with profile awareness
+            self.cache.set_file_info(file_path, self._fileinfo_to_dict(info), self.profile_hash)
             return info
             
         except Exception as e:
@@ -351,9 +631,10 @@ class UltraFileScanner:
 
 class ContentProcessor:
     """Advanced content processing with semantic understanding"""
-    def __init__(self, token_manager: TokenManager, code_analyzer: CodeAnalyzer):
+    def __init__(self, token_manager: TokenManager, code_analyzer: CodeAnalyzer, profile: ProcessingProfile = None):
         self.token_manager = token_manager
         self.code_analyzer = code_analyzer
+        self.profile = profile
     
     def process_file(self, file_info: FileInfo, token_budget: int) -> Tuple[str, int]:
         """Process file content with intelligent truncation"""
@@ -372,8 +653,14 @@ class ContentProcessor:
             if file_info.token_count <= token_budget:
                 return content, file_info.token_count
             
-            # Smart truncation based on file type
-            if file_info.semantic_data:
+            # Smart truncation based on configured strategy
+            strategy = self.profile.truncation_strategy if self.profile else 'semantic'
+            
+            if strategy == 'business_logic' and file_info.semantic_data:
+                return self._business_logic_truncate(content, file_info, token_budget)
+            elif strategy == 'middle_summarize':
+                return self._middle_summarize_truncate(content, file_info, token_budget)
+            elif strategy == 'semantic' and file_info.semantic_data:
                 return self._semantic_truncate(content, file_info, token_budget)
             else:
                 return self._basic_truncate(content, token_budget)
@@ -464,6 +751,192 @@ class ContentProcessor:
             current_tokens += 50
         
         return '\n'.join(result), current_tokens
+    
+    def _middle_summarize_truncate(self, content: str, file_info: FileInfo, token_budget: int) -> Tuple[str, int]:
+        """Advanced truncation that keeps beginning/end intact and summarizes middle"""
+        lines = content.splitlines()
+        
+        if file_info.language not in ['python', 'javascript', 'typescript', 'java']:
+            return self._basic_truncate(content, token_budget)
+        
+        # Calculate proportions
+        total_lines = len(lines)
+        header_ratio = 0.3  # 30% for header/imports
+        footer_ratio = 0.2  # 20% for exports/main logic
+        
+        header_lines = int(total_lines * header_ratio)
+        footer_lines = int(total_lines * footer_ratio)
+        
+        # Build header
+        result = lines[:header_lines]
+        current_tokens = self.token_manager.count_tokens('\n'.join(result))
+        
+        # Add footer if budget allows
+        footer_content = lines[-footer_lines:]
+        footer_tokens = self.token_manager.count_tokens('\n'.join(footer_content))
+        
+        if current_tokens + footer_tokens + 100 <= token_budget:
+            # Add middle summary
+            middle_start = header_lines
+            middle_end = total_lines - footer_lines
+            middle_summary = self._generate_middle_summary(
+                lines[middle_start:middle_end], 
+                file_info,
+                (token_budget - current_tokens - footer_tokens - 100) // 2
+            )
+            
+            result.append(f"\n... [Middle section summary] ...\n")
+            result.append(middle_summary)
+            result.append(f"\n... [Continuing to end] ...\n")
+            result.extend(footer_content)
+            
+            current_tokens = self.token_manager.count_tokens('\n'.join(result))
+        
+        return '\n'.join(result), current_tokens
+    
+    def _generate_middle_summary(self, lines: List[str], file_info: FileInfo, max_tokens: int) -> str:
+        """Generate a summary of the middle section of a file"""
+        summary_parts = []
+        
+        # Extract key information from the middle section
+        class_count = 0
+        function_count = 0
+        key_functions = []
+        key_classes = []
+        
+        for i, line in enumerate(lines):
+            line_stripped = line.strip()
+            
+            # Language-specific pattern matching
+            if file_info.language == 'python':
+                if line_stripped.startswith('class '):
+                    class_count += 1
+                    class_name = line_stripped.split()[1].split('(')[0].strip(':')
+                    key_classes.append(class_name)
+                elif line_stripped.startswith('def '):
+                    function_count += 1
+                    func_name = line_stripped.split()[1].split('(')[0]
+                    if not func_name.startswith('_'):  # Public functions
+                        key_functions.append(func_name)
+            
+            elif file_info.language in ['javascript', 'typescript']:
+                if 'class ' in line_stripped:
+                    class_count += 1
+                    parts = line_stripped.split('class ')
+                    if len(parts) > 1:
+                        class_name = parts[1].split()[0].strip('{')
+                        key_classes.append(class_name)
+                elif 'function ' in line_stripped or '=>' in line_stripped:
+                    function_count += 1
+                    if 'function ' in line_stripped:
+                        parts = line_stripped.split('function ')
+                        if len(parts) > 1:
+                            func_name = parts[1].split('(')[0]
+                            key_functions.append(func_name)
+        
+        # Build summary
+        summary_parts.append(f"Middle section contains:")
+        if class_count > 0:
+            summary_parts.append(f"- {class_count} classes: {', '.join(key_classes[:5])}")
+            if len(key_classes) > 5:
+                summary_parts.append(f"  (and {len(key_classes) - 5} more)")
+        
+        if function_count > 0:
+            summary_parts.append(f"- {function_count} functions: {', '.join(key_functions[:5])}")
+            if len(key_functions) > 5:
+                summary_parts.append(f"  (and {len(key_functions) - 5} more)")
+        
+        # Check for patterns
+        has_tests = any('test' in line.lower() or 'spec' in line.lower() for line in lines)
+        has_error_handling = any('try' in line or 'catch' in line or 'except' in line for line in lines)
+        
+        if has_tests:
+            summary_parts.append("- Contains test cases")
+        if has_error_handling:
+            summary_parts.append("- Includes error handling")
+        
+        return '\n'.join(summary_parts)
+    
+    def _business_logic_truncate(self, content: str, file_info: FileInfo, token_budget: int) -> Tuple[str, int]:
+        """Prioritize business logic over boilerplate"""
+        if not file_info.semantic_data:
+            return self._basic_truncate(content, token_budget)
+        
+        entities = file_info.semantic_data.get('entities', [])
+        lines = content.splitlines()
+        
+        # Categorize entities
+        imports = []
+        business_logic = []
+        utilities = []
+        tests = []
+        
+        for entity in entities:
+            entity_name = entity.name.lower()
+            
+            if entity.type == 'import':
+                imports.append(entity)
+            elif 'test' in entity_name or 'spec' in entity_name:
+                tests.append(entity)
+            elif any(util in entity_name for util in ['util', 'helper', 'format', 'parse', 'convert']):
+                utilities.append(entity)
+            else:
+                business_logic.append(entity)
+        
+        # Build result prioritizing business logic
+        included_lines = set()
+        current_tokens = 0
+        
+        # Always include imports
+        for entity in imports[:20]:  # Limit imports
+            included_lines.update(range(entity.line_start, entity.line_end + 1))
+        
+        # Include business logic entities
+        for entity in sorted(business_logic, key=lambda e: e.importance_score, reverse=True):
+            if current_tokens >= token_budget * 0.8:
+                break
+            
+            start = max(0, entity.line_start - 2)
+            end = min(len(lines), entity.line_end + 2)
+            
+            new_lines = set(range(start, end))
+            test_content = '\n'.join(lines[i] for i in new_lines if i not in included_lines)
+            test_tokens = self.token_manager.count_tokens(test_content)
+            
+            if current_tokens + test_tokens <= token_budget * 0.9:
+                included_lines.update(new_lines)
+                current_tokens += test_tokens
+        
+        # Fill remaining space with utilities if any
+        for entity in sorted(utilities, key=lambda e: e.importance_score, reverse=True):
+            if current_tokens >= token_budget * 0.95:
+                break
+            
+            start = max(0, entity.line_start - 1)
+            end = min(len(lines), entity.line_end + 1)
+            
+            new_lines = set(range(start, end))
+            test_content = '\n'.join(lines[i] for i in new_lines if i not in included_lines)
+            test_tokens = self.token_manager.count_tokens(test_content)
+            
+            if current_tokens + test_tokens <= token_budget:
+                included_lines.update(new_lines)
+                current_tokens += test_tokens
+        
+        # Build final content
+        result_lines = []
+        last_line = -1
+        
+        for line_num in sorted(included_lines):
+            if line_num > last_line + 1:
+                result_lines.append(f"\n... [Lines {last_line + 1}-{line_num - 1} omitted] ...\n")
+            result_lines.append(lines[line_num])
+            last_line = line_num
+        
+        if last_line < len(lines) - 1:
+            result_lines.append(f"\n... [Lines {last_line + 1}-{len(lines) - 1} omitted] ...\n")
+        
+        return '\n'.join(result_lines), current_tokens
     
     def _summarize_lockfile(self, content: str, filename: str) -> str:
         """Create a summary of lock files"""
@@ -591,12 +1064,15 @@ class UltraRepo2File:
     """Main class for ultra-optimized repository processing"""
     def __init__(self, profile: ProcessingProfile):
         self.profile = profile
-        self.cache = Cache()
+        # Create a profile-specific cache key
+        profile_key = f"{profile.model}_{profile.token_budget}_{profile.truncation_strategy}"
+        self.cache = Cache(profile_key=profile_key)
         self.token_manager = TokenManager(model=profile.model, budget=profile.token_budget)
         self.code_analyzer = CodeAnalyzer()
-        self.scanner = UltraFileScanner(self.cache, self.token_manager, self.code_analyzer)
-        self.processor = ContentProcessor(self.token_manager, self.code_analyzer)
+        self.scanner = UltraFileScanner(self.cache, self.token_manager, self.code_analyzer, self.profile)
+        self.processor = ContentProcessor(self.token_manager, self.code_analyzer, self.profile)
         self.codebase_analyzer = CodebaseAnalyzer(self.code_analyzer)
+        self.manifest_generator = ManifestGenerator(self.token_manager, self.code_analyzer)
     
     def process_repository(self, repo_path: Path, output_path: Path):
         """Process repository with all optimizations"""
@@ -637,6 +1113,18 @@ class UltraRepo2File:
         header_tokens = self.token_manager.count_tokens(header)
         self.token_manager.budget.reserve('header', header_tokens)
         output_parts.append(header)
+        
+        # Generate manifest for large contexts (for Gemini 1.5 Pro)
+        if self.profile.generate_manifest and (self.profile.model == 'gemini-1.5-pro' or self.profile.token_budget > 500000):
+            print("\nGenerating hierarchical manifest...")
+            manifest_text, offset_map = self.manifest_generator.generate_manifest(files, codebase_analysis)
+            manifest_tokens = self.token_manager.count_tokens(manifest_text)
+            
+            if self.token_manager.budget.remaining >= manifest_tokens:
+                self.token_manager.budget.reserve('manifest', manifest_tokens)
+                output_parts.append(manifest_text)
+            else:
+                output_parts.append("[Manifest omitted due to token budget]")
         
         # Add directory structure
         tree_structure = self._generate_tree_structure(repo_path, exclusion_spec)
@@ -834,6 +1322,8 @@ def main():
         print("  --profile NAME     Use named profile")
         print("  --exclude PATTERN  Add exclusion pattern")
         print("  --boost PATTERN    Boost priority for files matching pattern")
+        print("  --manifest         Generate hierarchical manifest")
+        print("  --truncation MODE  Truncation strategy (semantic, basic, middle_summarize, business_logic)")
         print("\nExamples:")
         print("  python dump_ultra.py ./myrepo output.txt")
         print("  python dump_ultra.py ./myrepo output.txt --model claude-3 --budget 200000")
@@ -870,6 +1360,12 @@ def main():
             profile_path = Path(sys.argv[i + 1])
             if profile_path.exists():
                 profile = ProcessingProfile.load(profile_path)
+            i += 2
+        elif arg == '--manifest':
+            profile.generate_manifest = True
+            i += 1
+        elif arg == '--truncation' and i + 1 < len(sys.argv):
+            profile.truncation_strategy = sys.argv[i + 1]
             i += 2
         else:
             i += 1

@@ -414,3 +414,52 @@ header p {
         align-items: flex-start;
     }
 }
+
+/* Large content warning styles */
+.large-content-warning {
+    background-color: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 4px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    color: #856404;
+}
+
+.large-content-warning p {
+    margin: 0;
+}
+
+.large-content-warning p:first-child {
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+
+/* Improve output content scrollability for large outputs */
+.output-content {
+    position: relative;
+}
+
+.output-content pre {
+    max-height: 70vh;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #888 #f1f1f1;
+}
+
+.output-content pre::-webkit-scrollbar {
+    width: 12px;
+}
+
+.output-content pre::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 6px;
+}
+
+.output-content pre::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 6px;
+}
+
+.output-content pre::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}

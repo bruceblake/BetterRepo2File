@@ -112,7 +112,7 @@ BetterRepo2File is a web-based UI for the repo2file tool that consolidates repos
    - **Ultra version** (`repo2file/dump_ultra.py`): Most advanced features:
      - Exact token counting using tiktoken
      - Semantic code analysis with AST parsing
-     - Multi-model support (GPT-4, GPT-3.5, Claude, Llama)
+     - Multi-model support (GPT-4, GPT-3.5, Claude, Llama, Gemini 1.5 Pro)
      - Caching system for performance
      - Parallel file processing
      - Advanced truncation strategies

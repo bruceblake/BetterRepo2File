@@ -41,8 +41,10 @@ def process_files():
         "options": {
             "file_types": [".py", ".js"],
             "use_gitignore": true,
-            "model": "gpt-4",  # for ultra mode
-            "token_budget": 500000  # for ultra mode
+            "model": "gpt-4",  # for ultra mode: gpt-4, gpt-3.5-turbo, claude-3, llama, gemini-1.5-pro
+            "token_budget": 500000,  # for ultra mode
+            "generate_manifest": true,  # for ultra mode
+            "truncation_strategy": "semantic"  # for ultra mode: semantic, basic, middle_summarize, business_logic
         }
     }
     """
@@ -127,7 +129,14 @@ def process_files():
         if mode == 'ultra':
             model = options.get('model', 'gpt-4')
             budget = options.get('token_budget', 500000)
+            generate_manifest = options.get('generate_manifest', False)
+            truncation_strategy = options.get('truncation_strategy', 'semantic')
+            
             cmd.extend(['--model', model, '--budget', str(budget)])
+            if generate_manifest:
+                cmd.append('--manifest')
+            if truncation_strategy:
+                cmd.extend(['--truncation', truncation_strategy])
         else:
             # Standard modes use exclusion file
             gitignore_path = os.path.join(input_path, '.gitignore')
