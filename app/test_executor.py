@@ -5,10 +5,10 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import re
-if __name__ == '__main__':
-    from logger import get_logger, log_step, log_metric, log_error
-else:
+try:
     from .logger import get_logger, log_step, log_metric, log_error
+except ImportError:
+    from logger import get_logger, log_step, log_metric, log_error
 
 class TestExecutor:
     """Execute user's tests with detailed output and metrics"""
