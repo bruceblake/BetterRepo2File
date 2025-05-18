@@ -397,3 +397,7 @@ class GitAnalyzer:
                 return subprocess.check_output(cmd, text=True).strip()
         except:
             return None
+    
+    def get_head_sha(self) -> Optional[str]:
+        """Alias for get_current_commit_hash for consistency"""
+        return self.get_current_commit_hash()

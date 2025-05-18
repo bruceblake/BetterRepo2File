@@ -4,19 +4,22 @@ class VibeCoderApp {
         this.currentStep = 1;
         this.state = {
             mode: 'vibe',
-            stage: null,
+            stage: 'A', // Default to planning stage
             vibe: '',
             refinedVibe: '',
             repository: null,
-            repoPath: '',
             repoUrl: '',
-            repoType: 'local', // 'local' or 'github'
+            repoBranch: '',
+            repoType: 'github', // Always github now
             dockerEnabled: false,
             dockerServices: [],
+            dockerComposeFile: null,
+            testCommand: '',
             plannerOutput: '',
             previousOutput: null,
             feedbackLog: null,
-            jobId: null
+            jobId: null,
+            sessionId: null
         };
         
         this.initializeEventListeners();
@@ -67,44 +70,21 @@ class VibeCoderApp {
             });
         }
         
-        // Tabs
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const tab = btn.getAttribute('data-tab');
-                const parent = btn.closest('.tabs');
-                
-                // Update active states
-                parent.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                
-                // Handle repo tab switching
-                if (parent.classList.contains('repo-tabs')) {
-                    // Hide all repo tab contents
-                    document.querySelectorAll('.repo-selection-section .tab-content').forEach(content => {
-                        content.classList.add('hidden');
-                    });
-                    // Show selected tab content
-                    const selectedContent = document.getElementById(tab);
-                    if (selectedContent) {
-                        selectedContent.classList.remove('hidden');
-                    }
-                    // Update repo type in state
-                    this.state.repoType = tab === 'repo-local-path' ? 'local' : 'github';
-                } else {
-                    // Original tab handling for other tabs
-                    const section = parent.nextElementSibling;
-                    while (section && section.classList.contains('tab-content')) {
-                        section.classList.add('hidden');
-                        section = section.nextElementSibling;
-                    }
-                    
-                    const content = document.getElementById(tab);
-                    if (content) {
-                        content.classList.remove('hidden');
-                    }
-                }
+        // Test command input
+        const testCommandInput = document.getElementById('testCommand');
+        if (testCommandInput) {
+            testCommandInput.addEventListener('input', (e) => {
+                this.state.testCommand = e.target.value;
             });
-        });
+        }
+        
+        // Docker test service selector
+        const dockerTestService = document.getElementById('dockerTestService');
+        if (dockerTestService) {
+            dockerTestService.addEventListener('change', (e) => {
+                this.state.dockerTestService = e.target.value;
+            });
+        }
         
         // Drop area
         const dropArea = document.getElementById('dropArea');
@@ -151,17 +131,17 @@ class VibeCoderApp {
         }
         
         // Repository inputs
-        const repoPathInput = document.getElementById('repoPathInput');
-        if (repoPathInput) {
-            repoPathInput.addEventListener('input', (e) => {
-                this.state.repoPath = e.target.value;
-            });
-        }
-        
         const githubUrlInput = document.getElementById('githubUrlInputRepo');
         if (githubUrlInput) {
             githubUrlInput.addEventListener('input', (e) => {
                 this.state.repoUrl = e.target.value;
+            });
+        }
+        
+        const githubBranchInput = document.getElementById('githubBranch');
+        if (githubBranchInput) {
+            githubBranchInput.addEventListener('input', (e) => {
+                this.state.repoBranch = e.target.value;
             });
         }
         
@@ -194,10 +174,32 @@ class VibeCoderApp {
             btn.addEventListener('click', () => this.previousStep());
         });
         
-        // Generate button
+        // Generate buttons
         const generateBtn = document.querySelector('.generate-btn');
         if (generateBtn) {
             generateBtn.addEventListener('click', () => this.startAnalysis());
+        }
+        
+        // Generate context button (step 3)
+        const generateContextBtn = document.querySelector('.generate-context-btn');
+        if (generateContextBtn) {
+            console.log('Generate context button found, attaching listener');
+            generateContextBtn.addEventListener('click', () => {
+                console.log('Generate context button clicked');
+                this.state.stage = 'A';
+                this.startAnalysis();
+            });
+        } else {
+            console.error('Generate context button not found!')
+        }
+        
+        // Generate coding button (step 4)
+        const generateCodingBtn = document.querySelector('.generate-coding-btn');
+        if (generateCodingBtn) {
+            generateCodingBtn.addEventListener('click', () => {
+                this.state.stage = 'B';
+                this.startAnalysis();
+            });
         }
         
         // Planner input choice
@@ -352,32 +354,42 @@ class VibeCoderApp {
     validateCurrentStep() {
         switch (this.currentStep) {
             case 1:
-                // Validate repository selection
-                if (this.state.repoType === 'local' && !this.state.repoPath) {
-                    alert('Please enter a local repository path');
-                    return false;
-                }
-                if (this.state.repoType === 'github' && !this.state.repoUrl) {
-                    alert('Please enter a GitHub repository URL');
-                    return false;
-                }
+                // Validate feature vibe and repository selection
                 if (!this.state.vibe) {
                     alert('Please describe your feature/goal');
                     return false;
                 }
-                return true;
-            case 2:
-                if (!this.state.stage) {
-                    alert('Please select a stage');
+                if (!this.state.repoUrl) {
+                    alert('Please enter a GitHub repository URL');
+                    return false;
+                }
+                // Validate GitHub URL format
+                const githubUrlPattern = /^https:\/\/github\.com\/[\w-]+\/[\w-]+$/;
+                if (!githubUrlPattern.test(this.state.repoUrl)) {
+                    alert('Please enter a valid GitHub repository URL (e.g., https://github.com/username/repo)');
                     return false;
                 }
                 return true;
+            case 2:
+                // Repository setup - no additional validation needed
+                return true;
             case 3:
-                // Stage-specific validation
-                if (this.state.stage === 'B' && !this.state.plannerOutput && !document.getElementById('plannerFile').files[0]) {
+                // Planning phase - set stage to A automatically
+                this.state.stage = 'A';
+                return true;
+            case 4:
+                // Coding phase - set stage to B and validate planner output
+                this.state.stage = 'B';
+                const plannerText = document.getElementById('plannerText');
+                const plannerFile = document.getElementById('plannerFile');
+                if (plannerText && !plannerText.value && plannerFile && !plannerFile.files[0]) {
                     alert('Please provide planner output');
                     return false;
                 }
+                return true;
+            case 5:
+                // Loop phase - set stage to C
+                this.state.stage = 'C';
                 return true;
             default:
                 return true;
@@ -394,6 +406,11 @@ class VibeCoderApp {
             currentContent.classList.remove('hidden');
         }
         
+        // If we just moved to step 2, detect docker-compose
+        if (this.currentStep === 2 && this.state.repoUrl) {
+            this.detectDockerCompose();
+        }
+        
         // Show stage-specific inputs
         if (this.currentStep === 3) {
             document.querySelectorAll('.stage-input').forEach(input => {
@@ -404,6 +421,14 @@ class VibeCoderApp {
                 document.getElementById('stage-b-input').classList.remove('hidden');
             } else if (this.state.stage === 'C') {
                 document.getElementById('stage-c-input').classList.remove('hidden');
+            }
+        }
+        
+        // If we just moved to step 4, populate the planner output
+        if (this.currentStep === 4 && this.state.plannerOutput) {
+            const plannerText = document.getElementById('plannerText');
+            if (plannerText) {
+                plannerText.value = this.state.plannerOutput;
             }
         }
     }
@@ -442,18 +467,21 @@ class VibeCoderApp {
     }
     
     async startAnalysis() {
+        console.log('Starting analysis with state:', this.state);
+        
         const formData = new FormData();
         
         // Add basic data
         formData.append('vibe', this.state.vibe);
         formData.append('stage', this.state.stage);
         
+        console.log('Sending request with stage:', this.state.stage);
+        
         // Add repository information
-        formData.append('repo_type', this.state.repoType);
-        if (this.state.repoType === 'local') {
-            formData.append('repo_path', this.state.repoPath);
-        } else if (this.state.repoType === 'github') {
-            formData.append('repo_url', this.state.repoUrl);
+        formData.append('repo_type', 'github');
+        formData.append('repo_url', this.state.repoUrl);
+        if (this.state.repoBranch) {
+            formData.append('repo_branch', this.state.repoBranch);
         }
         
         // Add legacy repository support (files)
@@ -483,10 +511,18 @@ class VibeCoderApp {
             }
         }
         
+        // Add test configuration
+        if (this.state.testCommand) {
+            formData.append('test_command', this.state.testCommand);
+        }
+        
         // Add Docker data
         if (this.state.dockerEnabled) {
             formData.append('docker_enabled', 'true');
             formData.append('docker_services', JSON.stringify(this.state.dockerServices));
+            if (this.state.dockerTestService) {
+                formData.append('docker_test_service', this.state.dockerTestService);
+            }
         }
         
         // Show progress overlay
@@ -501,6 +537,10 @@ class VibeCoderApp {
             
             const data = await response.json();
             this.state.jobId = data.job_id;
+            if (data.session_id) {
+                this.state.sessionId = data.session_id;
+                window.unifiedState.sessionId = data.session_id; // Update exposed state
+            }
             
             // Start listening for progress updates
             this.listenForProgress();
@@ -513,9 +553,11 @@ class VibeCoderApp {
     }
     
     listenForProgress() {
+        console.log('Starting EventSource for job:', this.state.jobId);
         const eventSource = new EventSource(`/api/status/${this.state.jobId}`);
         
         eventSource.onmessage = (event) => {
+            console.log('Progress event:', event.data);
             const data = JSON.parse(event.data);
             
             if (data.error) {
@@ -527,8 +569,15 @@ class VibeCoderApp {
             }
             
             if (data.phase === 'completed') {
+                console.log('Analysis completed, fetching results');
                 eventSource.close();
                 this.fetchResults();
+                return;
+            }
+            
+            // Check for keepalive
+            if (data.keepalive) {
+                console.log('Keepalive received');
                 return;
             }
             
@@ -537,7 +586,7 @@ class VibeCoderApp {
         };
         
         eventSource.onerror = (error) => {
-            console.error('EventSource error:', error);
+            console.error('EventSource error:', error, 'readyState:', eventSource.readyState);
             eventSource.close();
             this.hideProgress();
         };
@@ -579,6 +628,22 @@ class VibeCoderApp {
     }
     
     showResults(result) {
+        if (this.state.stage === 'A' && this.currentStep === 3) {
+            // For stage A (planning), advance to next step
+            this.hideProgress();
+            this.currentStep++;
+            this.updateStepVisibility();
+            this.updateStepIndicators();
+            
+            // Store the Section A content
+            if (result.copy_text) {
+                this.state.plannerOutput = result.copy_text;
+            }
+            
+            return;
+        }
+        
+        // For other stages, show results
         // Hide wizard
         document.getElementById('vibe-workflow').classList.add('hidden');
         
@@ -686,6 +751,59 @@ class VibeCoderApp {
     hideProgress() {
         document.getElementById('progressOverlay').classList.add('hidden');
     }
+    
+    async detectDockerCompose() {
+        try {
+            const response = await fetch('/api/detect-docker-compose', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    repo_url: this.state.repoUrl,
+                    repo_branch: this.state.repoBranch
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.has_compose) {
+                this.state.dockerComposeFile = data.compose_file;
+                this.state.dockerServices = data.services;
+                
+                // Update UI
+                const dockerCheckbox = document.getElementById('useDocker');
+                if (dockerCheckbox) {
+                    dockerCheckbox.checked = true;
+                    this.state.dockerEnabled = true;
+                    
+                    // Show docker config
+                    const dockerConfig = document.getElementById('dockerConfig');
+                    dockerConfig.classList.remove('hidden');
+                    
+                    // Show services section
+                    const servicesSection = document.querySelector('.docker-services-section');
+                    servicesSection.classList.remove('hidden');
+                    
+                    // Populate services list
+                    const servicesList = document.getElementById('dockerServices');
+                    servicesList.innerHTML = data.services.map(service => 
+                        `<div class="service-item">${service}</div>`
+                    ).join('');
+                    
+                    // Populate service selector
+                    const serviceSelect = document.getElementById('dockerTestService');
+                    serviceSelect.innerHTML = '<option value="">Select a service</option>';
+                    data.services.forEach(service => {
+                        const option = document.createElement('option');
+                        option.value = service;
+                        option.textContent = service;
+                        serviceSelect.appendChild(option);
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Failed to detect docker-compose:', error);
+        }
+    }
 }
 
 // Global functions for HTML onclick
@@ -785,4 +903,5 @@ function cancelRefinedVibe() {
 // Initialize the app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     window.vibeCoderApp = new VibeCoderApp();
+    window.unifiedState = window.vibeCoderApp.state; // Expose state for other components
 });

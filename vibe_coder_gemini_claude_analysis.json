@@ -1,0 +1,39 @@
+{
+  "action_blocks": {
+    "summary": {
+      "total_blocks": 0,
+      "by_type": {}
+    },
+    "blocks": [],
+    "insights": {
+      "high_priority_count": 0,
+      "most_connected_entities": [],
+      "most_changed_files": []
+    }
+  },
+  "codebase_analysis": {
+    "total_files": 0,
+    "total_size": 0,
+    "languages": {},
+    "file_types": {},
+    "primary_language": null,
+    "frameworks": [],
+    "project_type": "Software Project",
+    "dependency_graph": {},
+    "key_files": [],
+    "statistics": {
+      "binary_files": 0,
+      "generated_files": 0,
+      "critical_files": 0,
+      "total_tokens": 0,
+      "avg_file_size": 0
+    }
+  },
+  "processing_stats": {
+    "files_processed": 0,
+    "total_files": 0,
+    "tokens_used": 0,
+    "token_budget": 500000,
+    "processing_time_seconds": 0.001420736312866211
+  }
+}

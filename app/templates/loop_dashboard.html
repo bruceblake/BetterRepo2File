@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vibe Coder Loop Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/loop_dashboard.css') }}">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <h1>Vibe Coder Loop Dashboard</h1>
+            <button id="backToMain" class="btn btn-secondary">Back to Main</button>
+        </header>
+
+        <!-- Main Dashboard Container -->
+        <div class="dashboard-container">
+            
+            <!-- Session Info Bar -->
+            <div class="session-info">
+                <h3>Session: <span id="sessionId"></span></h3>
+                <p>Feature Vibe: <span id="featureVibe"></span></p>
+                <p>Repository: <span id="repoPath"></span></p>
+            </div>
+
+            <!-- Phase/Status Indicator -->
+            <div class="phase-indicator">
+                <div class="phase" data-phase="initialize">
+                    <div class="phase-icon">⚪</div>
+                    <div class="phase-label">Initialize</div>
+                </div>
+                <div class="phase" data-phase="planning">
+                    <div class="phase-icon">⚪</div>
+                    <div class="phase-label">Planning</div>
+                </div>
+                <div class="phase" data-phase="coding">
+                    <div class="phase-icon">⚪</div>
+                    <div class="phase-label">Coding</div>
+                </div>
+                <div class="phase" data-phase="analyze">
+                    <div class="phase-icon">⚪</div>
+                    <div class="phase-label">Analyze</div>
+                </div>
+                <div class="phase" data-phase="brief">
+                    <div class="phase-icon">⚪</div>
+                    <div class="phase-label">Brief</div>
+                </div>
+            </div>
+
+            <!-- Core Action Buttons -->
+            <div class="action-buttons">
+                <button id="startLoopBtn" class="btn btn-primary" disabled>Start New Loop</button>
+                <button id="generateSectionABtn" class="btn btn-secondary" disabled>Generate Section A</button>
+                <button id="analyzeChangesBtn" class="btn btn-secondary" disabled>Analyze Changes</button>
+                <button id="generateSectionCBtn" class="btn btn-secondary" disabled>Generate Section C</button>
+                <button id="viewHistoryBtn" class="btn btn-info">View History</button>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="main-content">
+                <!-- Section A Display -->
+                <div class="section-display" id="sectionADisplay">
+                    <h3>Section A (Planner Input)</h3>
+                    <div class="section-content">
+                        <pre id="sectionAContent">Section A content will appear here...</pre>
+                    </div>
+                    <div class="section-actions">
+                        <button class="btn btn-sm" id="copySectionABtn">Copy to Clipboard</button>
+                        <button class="btn btn-sm" id="editSectionABtn">Edit</button>
+                    </div>
+                </div>
+
+                <!-- Section B Display -->
+                <div class="section-display" id="sectionBDisplay">
+                    <h3>Section B (Coder Input)</h3>
+                    <div class="section-content">
+                        <pre id="sectionBContent">Section B content will appear here...</pre>
+                    </div>
+                    <div class="section-actions">
+                        <button class="btn btn-sm" id="copySectionBBtn">Copy to Clipboard</button>
+                        <button class="btn btn-sm" id="editSectionBBtn">Edit</button>
+                    </div>
+                </div>
+
+                <!-- Section C Display -->
+                <div class="section-display" id="sectionCDisplay">
+                    <h3>Section C (Iteration Brief)</h3>
+                    <div class="section-content">
+                        <pre id="sectionCContent">Section C content will appear here...</pre>
+                    </div>
+                    <div class="section-actions">
+                        <button class="btn btn-sm" id="copySectionCBtn">Copy to Clipboard</button>
+                        <button class="btn btn-sm" id="saveSectionCBtn">Save</button>
+                    </div>
+                </div>
+
+                <!-- Commit History -->
+                <div class="commit-history" id="commitHistory">
+                    <h3>Commit History</h3>
+                    <div class="commit-list" id="commitList">
+                        <!-- Commits will be added here dynamically -->
+                    </div>
+                </div>
+
+                <!-- Test Results -->
+                <div class="test-results" id="testResults">
+                    <h3>Test Results</h3>
+                    <div class="test-summary" id="testSummary">
+                        <span class="test-passed">✅ Passed: <span id="testsPassed">0</span></span>
+                        <span class="test-failed">❌ Failed: <span id="testsFailed">0</span></span>
+                        <span class="test-errors">⚠️ Errors: <span id="testsErrors">0</span></span>
+                    </div>
+                    <div class="test-details" id="testDetails">
+                        <!-- Test details will be added here dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Side Panel -->
+            <div class="side-panel">
+                <!-- Iteration Counter -->
+                <div class="iteration-counter">
+                    <h4>Current Iteration</h4>
+                    <div class="iteration-number" id="iterationNumber">1</div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="quick-actions">
+                    <h4>Quick Actions</h4>
+                    <button class="btn btn-sm" id="refreshStatusBtn">Refresh Status</button>
+                    <button class="btn btn-sm" id="exportSessionBtn">Export Session</button>
+                    <button class="btn btn-sm" id="viewLogsBtn">View Logs</button>
+                </div>
+
+                <!-- Status Log -->
+                <div class="status-log">
+                    <h4>Status Log</h4>
+                    <div class="log-entries" id="logEntries">
+                        <!-- Log entries will be added here dynamically -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/loop_dashboard.js') }}"></script>
+</body>
+</html>

@@ -2105,48 +2105,146 @@ class UltraRepo2File:
             "raw_content": content
         }
     
-    def generate_iteration_brief(self, repo_path: Path, previous_output: Dict, user_feedback: str = "") -> str:
-        """Generate iteration brief for Gemini planner"""
+    def generate_iteration_brief(self, repo_path: Path, session_data: Dict, user_feedback: str = "") -> str:
+        """Generate iteration brief (Section C) for Gemini planner"""
         brief = []
-        brief.append("# Iteration Brief for AI Planning Agent")
+        brief.append("=" * 50)
+        brief.append("SECTION 3: ITERATION CONTEXT FOR AI PLANNING AGENT")
+        brief.append("This section provides updated context after a coding iteration.")
+        brief.append("=" * 50)
         brief.append("")
         
         # Original vibe/goals
-        if previous_output["vibe_statement"]:
+        if session_data.get("feature_vibe"):
             brief.append("## RECAP OF ORIGINAL FEATURE VIBE/GOAL:")
-            brief.append(previous_output["vibe_statement"])
+            brief.append(session_data["feature_vibe"])
             brief.append("")
         
-        # Git diff summary
-        if self.git_analyzer and self.git_analyzer.is_git_repo():
-            diff_summary = self.git_analyzer.get_diff_summary()
-            brief.append("## Changes Since Last Iteration")
-            brief.append(f"- Modified files: {len(diff_summary['changed_files'])}")
-            brief.append(f"- Summary: {diff_summary['overall_summary_stats']}")
-            brief.append("")
-            brief.append("### Key Modified Functions")
-            for func in diff_summary['key_modified_functions'][:10]:
-                brief.append(f"- {func}")
-            brief.append("")
-        
-        # User feedback
+        # User feedback and notes
         if user_feedback:
-            brief.append("## User Feedback")
+            brief.append("## USER'S FEEDBACK & NOTES ON RECENT WORK:")
             brief.append(user_feedback)
             brief.append("")
         
-        # Key insights from previous iteration
-        if previous_output["planner_output"]:
-            brief.append("## Previous Planning Context")
-            brief.append("(Truncated for brevity)")
-            # Extract key sections from planner output
-            lines = previous_output["planner_output"].split('\n')
-            for i, line in enumerate(lines):
-                if "Project Structure Summary" in line or "Key Technologies" in line:
-                    brief.extend(lines[i:i+10])
-                    brief.append("...")
-                    break
+        # Git diff summary
+        latest_iteration = session_data.get('iterations', [])[-1] if session_data.get('iterations') else None
+        if latest_iteration and latest_iteration.get('diff_summary'):
+            diff_summary = latest_iteration['diff_summary']
+            brief.append("## GIT DIFF SUMMARY SINCE LAST PLANNING:")
+            brief.append(f"- Files changed: {len(diff_summary.get('changed_files', []))}")
+            brief.append(f"- Overall changes: {diff_summary.get('overall_summary_stats', 'N/A')}")
             brief.append("")
+            
+            if diff_summary.get('changed_files'):
+                brief.append("### Modified Files:")
+                for file_info in diff_summary['changed_files'][:10]:  # Limit to top 10
+                    file_path = file_info.get('file', '')
+                    status = file_info.get('status', 'M')
+                    insertions = file_info.get('insertions', 0)
+                    deletions = file_info.get('deletions', 0)
+                    brief.append(f"- {file_path} [{status}] +{insertions}/-{deletions}")
+                if len(diff_summary['changed_files']) > 10:
+                    brief.append(f"- ... and {len(diff_summary['changed_files']) - 10} more files")
+                brief.append("")
+            
+            if diff_summary.get('key_modified_functions'):
+                brief.append("### Key Modified Functions:")
+                for func_info in diff_summary['key_modified_functions'][:10]:
+                    if isinstance(func_info, dict):
+                        file_name = func_info.get('file', 'unknown')
+                        func_name = func_info.get('function', 'unknown')
+                        change_type = func_info.get('change_type', 'modified')
+                        brief.append(f"- {file_name}: {func_name} ({change_type})")
+                    else:
+                        brief.append(f"- {func_info}")
+                if len(diff_summary['key_modified_functions']) > 10:
+                    brief.append(f"- ... and {len(diff_summary['key_modified_functions']) - 10} more functions")
+                brief.append("")
+        
+        # Test Results Diff
+        if latest_iteration and latest_iteration.get('test_results'):
+            test_results = latest_iteration['test_results']
+            brief.append("## TEST RESULTS DIFF:")
+            
+            if test_results.get('passed') is not None:
+                brief.append(f"- Status: {'✅ PASSED' if test_results['passed'] else '❌ FAILED'}")
+            
+            if test_results.get('summary'):
+                brief.append(f"- Summary: {test_results['summary']}")
+            
+            if test_results.get('command'):
+                brief.append(f"- Command: {test_results['command']}")
+            
+            if test_results.get('elapsed_time'):
+                brief.append(f"- Duration: {test_results['elapsed_time']:.2f}s")
+            
+            if test_results.get('error'):
+                brief.append(f"- Error: {test_results['error']}")
+            
+            brief.append("")
+        
+        # Previous planning context (truncated)
+        if session_data.get("last_gemini_plan"):
+            brief.append("## PREVIOUS PLANNING CONTEXT (Summary):")
+            plan_lines = session_data["last_gemini_plan"].split('\n')
+            # Extract first 20 lines or until we find a section header
+            summary_lines = []
+            for i, line in enumerate(plan_lines[:50]):
+                summary_lines.append(line)
+                if i > 20 and (line.startswith('#') or line.startswith('**')):
+                    break
+            brief.extend(summary_lines)
+            brief.append("... (truncated)")
+            brief.append("")
+        
+        # Focused code snapshot
+        brief.append("## FOCUSED CURRENT CODE SNAPSHOT:")
+        brief.append("")
+        
+        # Generate focused snapshot of changed files
+        if latest_iteration and latest_iteration.get('diff_summary'):
+            changed_files = [f['file'] for f in latest_iteration['diff_summary'].get('changed_files', [])]
+            
+            # Add files mentioned in user feedback
+            if user_feedback:
+                import re
+                # Look for file paths in feedback
+                potential_files = re.findall(r'[\w/]+\.\w+', user_feedback)
+                changed_files.extend(potential_files)
+            
+            # Remove duplicates and filter to existing files
+            unique_files = list(set(changed_files))
+            existing_files = []
+            for file_path in unique_files:
+                full_path = repo_path / file_path
+                if full_path.exists():
+                    existing_files.append(full_path)
+            
+            # Generate mini manifest for these files
+            if existing_files:
+                brief.append("### Files included in this snapshot:")
+                for file_path in existing_files[:10]:  # Limit to 10 files
+                    rel_path = file_path.relative_to(repo_path)
+                    brief.append(f"- {rel_path}")
+                brief.append("")
+                
+                # Now generate actual content (limited by token budget)
+                # This is where we'd run a focused version of the manifest generation
+                brief.append("### File Contents:")
+                brief.append("```")
+                brief.append("[File content generation would go here - limited by iteration_code_snapshot_budget]")
+                brief.append("```")
+            else:
+                brief.append("No changed files found for focused snapshot.")
+        
+        brief.append("")
+        brief.append("## REQUEST FOR NEXT PLANNING ITERATION:")
+        brief.append("Based on the above changes, test results, and my feedback, please provide:")
+        brief.append("1. Assessment of what was successfully implemented")
+        brief.append("2. What still needs to be done to complete the feature")
+        brief.append("3. Any issues or bugs that need to be addressed")
+        brief.append("4. Suggested next steps for the AI Coder")
+        brief.append("")
         
         return '\n'.join(brief)
 

@@ -39,6 +39,26 @@ os.makedirs(app.config['JOBS_FOLDER'], exist_ok=True)
 jobs = {}
 job_queues = {}
 
+# Session storage for Vibe Coder Loop
+sessions = {}
+
+def save_session_data(session_id: str, session_data: dict):
+    """Save session data to file"""
+    session_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'session_{session_id}')
+    os.makedirs(session_dir, exist_ok=True)
+    
+    session_file = os.path.join(session_dir, 'session_data.json')
+    with open(session_file, 'w') as f:
+        json.dump(session_data, f, indent=2)
+
+def load_session_data(session_id: str) -> dict:
+    """Load session data from file"""
+    session_file = os.path.join(app.config['UPLOAD_FOLDER'], f'session_{session_id}', 'session_data.json')
+    if os.path.exists(session_file):
+        with open(session_file, 'r') as f:
+            return json.load(f)
+    return None
+
 def send_progress(job_id, phase, current=0, total=0):
     """Send progress update to the job queue"""
     if job_id in job_queues:
@@ -51,8 +71,9 @@ def send_progress(job_id, phase, current=0, total=0):
             'total': total
         })
 
-def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, previous_output, feedback_log, repo_type=None, repo_path_input=None, repo_url=None):
+def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, previous_output, feedback_log, repo_type=None, repo_path_input=None, repo_url=None, repo_branch=None):
     """Process a job in the background"""
+    print(f"Starting job {job_id} with stage {stage}, repo_url: {repo_url}, branch: {repo_branch}")
     try:
         send_progress(job_id, 'extracting', 0, 0)
         
@@ -68,10 +89,20 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
         elif repo_type == 'github' and repo_url:
             # Clone GitHub repository
             repo_path = os.path.join(job_folder, 'repo')
+            print(f"Cloning GitHub repo: {repo_url} to {repo_path}")
             try:
-                subprocess.run(['git', 'clone', repo_url, repo_path], 
-                              check=True, capture_output=True, text=True)
+                if repo_branch:
+                    # Clone specific branch
+                    print(f"Cloning branch: {repo_branch}")
+                    result = subprocess.run(['git', 'clone', '-b', repo_branch, repo_url, repo_path], 
+                                  check=True, capture_output=True, text=True)
+                else:
+                    # Clone default branch
+                    result = subprocess.run(['git', 'clone', repo_url, repo_path], 
+                                  check=True, capture_output=True, text=True)
+                print(f"Clone successful: {result}")
             except subprocess.CalledProcessError as e:
+                print(f"Clone failed: {e}")
                 raise Exception(f"Failed to clone repository: {e.stderr}")
                 
         elif repo_file:
@@ -100,9 +131,11 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
         send_progress(job_id, 'analyzing', 0, 0)
         
         # Build repo2file command based on stage
-        cmd = [sys.executable, app.config['REPO2FILE_ULTRA_PATH']]
+        # Run as module to handle relative imports correctly
+        cmd = [sys.executable, '-m', 'repo2file.dump_ultra']
         cmd.extend(['--profile', 'vibe_coder_gemini_claude'])
         cmd.extend(['--vibe', vibe])
+        cmd.extend(['--stage', stage])  # Add stage to command
         cmd.extend(['--output', os.path.join(job_folder, 'output.txt')])
         
         if stage == 'B' and planner_output:
@@ -121,17 +154,52 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
         cmd.append(repo_path or '.')
         
         # Run the analysis
-        process = subprocess.run(cmd, capture_output=True, text=True)
+        print(f"Running command: {' '.join(cmd)}")
+        # Set the working directory to the project root so modules can be found
+        working_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        process = subprocess.run(cmd, capture_output=True, text=True, cwd=working_dir)
         
+        print(f"Process return code: {process.returncode}")
+        if process.stdout:
+            print(f"Stdout: {process.stdout[:500]}...")
+        if process.stderr:
+            print(f"Stderr: {process.stderr}")  # Show full stderr for debugging
+            
         if process.returncode != 0:
-            raise Exception(f"Repo2File failed: {process.stderr}")
+            # Log the full error for debugging
+            error_msg = f"Repo2File failed with return code {process.returncode}"
+            if process.stderr:
+                error_msg += f"\nStderr: {process.stderr}"
+            if process.stdout:
+                error_msg += f"\nStdout: {process.stdout}"
+            print(error_msg)
+            raise Exception(error_msg)
         
         send_progress(job_id, 'finalizing', 100, 100)
         
         # Read the output and parse sections
         output_file = os.path.join(job_folder, 'output.txt')
-        with open(output_file, 'r') as f:
-            full_content = f.read()
+        print(f"Looking for output file at: {output_file}")
+        
+        # List all files in the job folder for debugging
+        print(f"Files in job folder {job_folder}:")
+        for root, dirs, files in os.walk(job_folder):
+            for file in files:
+                filepath = os.path.join(root, file)
+                print(f"  {filepath} ({os.path.getsize(filepath)} bytes)")
+        
+        if not os.path.exists(output_file):
+            raise Exception(f"Output file not found at {output_file}")
+            
+        print(f"Output file size: {os.path.getsize(output_file)} bytes")
+        
+        try:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                full_content = f.read()
+                print(f"Read {len(full_content)} characters from output file")
+        except Exception as e:
+            print(f"Error reading output file: {e}")
+            raise Exception(f"Failed to read output file: {e}")
         
         # Parse sections (simplified for now)
         sections = {
@@ -145,7 +213,12 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
         jobs[job_id]['status'] = 'completed'
         jobs[job_id]['result'] = sections
         
+        # Send completed phase before ending
+        print(f"Job {job_id} completed successfully, sending completed signal")
+        send_progress(job_id, 'completed', 100, 100)
+        
     except Exception as e:
+        print(f"Job {job_id} failed with error: {str(e)}")
         jobs[job_id]['status'] = 'error'
         jobs[job_id]['error'] = str(e)
         send_progress(job_id, 'error', 0, 0)
@@ -217,6 +290,10 @@ atexit.register(lambda: scheduler.shutdown())
 def index():
     return render_template('index.html')
 
+@app.route('/loop-dashboard')
+def loop_dashboard():
+    return render_template('loop_dashboard.html')
+
 # New UI API endpoints
 @app.route('/api/analyze', methods=['POST'])
 def analyze():
@@ -234,9 +311,39 @@ def analyze():
     feedback_log = request.files.get('feedback_log')
     
     # Get repository information
-    repo_type = request.form.get('repo_type', '')  # 'local' or 'github'
+    repo_type = request.form.get('repo_type', 'github')  # Default to github
     repo_path = request.form.get('repo_path', '')  # Local path
     repo_url = request.form.get('repo_url', '')    # GitHub URL
+    repo_branch = request.form.get('repo_branch', '')  # GitHub branch
+    
+    # Session management for vibe coder workflow
+    session_id = request.form.get('session_id', '')
+    if not session_id and vibe and (stage == 'A' or (stage == 'B' and not previous_output)):
+        # Create new session for vibe coder workflow
+        session_id = str(uuid.uuid4())
+        sessions[session_id] = {
+            'id': session_id,
+            'feature_vibe': vibe,
+            'repo_type': repo_type,
+            'repo_path': repo_path,
+            'repo_url': repo_url,
+            'created_at': time.time(),
+            'phases': {},
+            'iterations': [],
+            'current_phase': 'started',
+            'last_gemini_plan': None,
+            'commit_history': []
+        }
+        
+        # Get initial commit SHA if local repo
+        if repo_type == 'local' and repo_path and os.path.exists(repo_path):
+            try:
+                import git
+                repo = git.Repo(repo_path)
+                sessions[session_id]['initial_sha'] = repo.head.commit.hexsha
+                sessions[session_id]['current_sha'] = repo.head.commit.hexsha
+            except Exception as e:
+                print(f"Warning: Could not get git SHA: {e}")
     
     # Create job folder
     job_folder = os.path.join(app.config['JOBS_FOLDER'], job_id)
@@ -249,14 +356,23 @@ def analyze():
         'current': 0,
         'total': 0,
         'error': None,
-        'result': None
+        'result': None,
+        'session_id': session_id if session_id else None
     }
     
+    # Update session if exists
+    if session_id and session_id in sessions:
+        sessions[session_id]['current_phase'] = f'processing_{stage}'
+        sessions[session_id]['latest_job_id'] = job_id
+    
     # Start processing in background thread
-    thread = threading.Thread(target=process_job, args=(job_id, job_folder, vibe, stage, repo_file, planner_output, previous_output, feedback_log, repo_type, repo_path, repo_url))
+    thread = threading.Thread(target=process_job, args=(job_id, job_folder, vibe, stage, repo_file, planner_output, previous_output, feedback_log, repo_type, repo_path, repo_url, repo_branch))
     thread.start()
     
-    return jsonify({'job_id': job_id}), 200
+    return jsonify({
+        'job_id': job_id, 
+        'session_id': session_id if session_id else None
+    }), 200
 
 @app.route('/api/status/<job_id>')
 def status(job_id):
@@ -292,6 +408,258 @@ def result(job_id):
         return jsonify({'error': job['error']}), 500
     
     return jsonify(job['result']), 200
+
+@app.route('/api/v1/loop/status/<session_id>')
+def loop_status(session_id):
+    """Get the current status of a vibe coder loop session"""
+    # Try to load from memory first, then from file
+    session = sessions.get(session_id)
+    if not session:
+        session = load_session_data(session_id)
+        if session:
+            sessions[session_id] = session  # Cache in memory
+    
+    if not session:
+        return jsonify({'error': 'Invalid session ID'}), 404
+    
+    # Prepare response data
+    response = {
+        'session_id': session_id,
+        'feature_vibe': session['feature_vibe'],
+        'current_phase': session['current_phase'],
+        'repo_type': session['repo_type'],
+        'repo_path': session.get('repo_path'),
+        'repo_url': session.get('repo_url'),
+        'iterations': len(session['iterations']),
+        'latest_job_id': session.get('latest_job_id'),
+        'initial_sha': session.get('initial_sha'),
+        'current_sha': session.get('current_sha'),
+        'commit_history': session.get('commit_history', [])
+    }
+    
+    # Add latest iteration data if available
+    if session['iterations'] and session['current_phase'] in ['diff_analysis_complete', 'section_c_ready']:
+        latest_iteration = session['iterations'][-1]
+        response['latest_iteration_data'] = {
+            'iteration_number': latest_iteration.get('iteration_number'),
+            'sha': latest_iteration.get('new_sha'),
+            'diff_summary': latest_iteration.get('diff_summary'),
+            'test_results': latest_iteration.get('test_results'),
+            'is_section_c_ready': bool(latest_iteration.get('section_c_output_file'))
+        }
+    
+    return jsonify(response), 200
+
+@app.route('/api/v1/loop/analyze_changes/<session_id>', methods=['POST'])
+def analyze_changes(session_id):
+    """Analyze recent commits and changes for a vibe coder loop session"""
+    if session_id not in sessions:
+        return jsonify({'error': 'Invalid session ID'}), 404
+    
+    session = sessions[session_id]
+    
+    # Only analyze if we have a local repository
+    if session['repo_type'] != 'local' or not session.get('repo_path'):
+        return jsonify({'error': 'Only local repositories supported for analysis'}), 400
+    
+    repo_path = session['repo_path']
+    if not os.path.exists(repo_path):
+        return jsonify({'error': 'Repository path not found'}), 404
+    
+    try:
+        # Update the current phase
+        session['current_phase'] = 'analyzing_changes'
+        
+        # Get the diff summary
+        from repo2file.git_analyzer import GitAnalyzer
+        git_analyzer = GitAnalyzer(repo_path)
+        
+        # Get current HEAD SHA
+        current_sha = git_analyzer.get_head_sha()
+        old_sha = session.get('current_sha', session.get('initial_sha'))
+        
+        if not old_sha:
+            return jsonify({'error': 'No previous commit SHA found'}), 400
+        
+        # Generate diff summary
+        diff_summary = git_analyzer.get_diff_summary(old_sha, current_sha)
+        
+        # Run tests if configured
+        test_results = {}
+        profile_test_command = None
+        
+        # Try to get test command from profile
+        try:
+            if hasattr(app, 'profile') and hasattr(app.profile, 'test_command'):
+                profile_test_command = app.profile.test_command
+        except:
+            pass
+        
+        if profile_test_command:
+            from repo2file.test_runner import run_project_tests
+            test_results = run_project_tests(repo_path, profile_test_command)
+        
+        # Store analysis results
+        iteration_num = len(session['iterations']) + 1
+        iteration_data = {
+            'iteration_number': iteration_num,
+            'old_sha': old_sha,
+            'new_sha': current_sha,
+            'diff_summary': diff_summary,
+            'test_results': test_results,
+            'timestamp': time.time(),
+            'user_feedback_file': None,
+            'section_c_output_file': None
+        }
+        
+        session['iterations'].append(iteration_data)
+        session['current_sha'] = current_sha
+        session['current_phase'] = 'diff_analysis_complete'
+        
+        # Extract commit message if available
+        try:
+            commit_msg = git_analyzer.repo.commit(current_sha).message.strip() if git_analyzer.repo else None
+        except:
+            commit_msg = None
+        
+        # Update commit history for UI
+        commit_info = {
+            'sha': current_sha,
+            'message': commit_msg or 'No commit message',
+            'tests_passed': test_results.get('passed', False),
+            'test_summary': test_results.get('summary', '')
+        }
+        session['commit_history'].append(commit_info)
+        
+        # Save full session data to file
+        save_session_data(session_id, session)
+        
+        # Save iteration analysis to separate file
+        session_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'session_{session_id}')
+        os.makedirs(session_dir, exist_ok=True)
+        
+        iteration_file = os.path.join(session_dir, f'iteration_{iteration_num}_analysis.json')
+        with open(iteration_file, 'w') as f:
+            json.dump(iteration_data, f, indent=2)
+        
+        return jsonify({
+            'success': True,
+            'iteration': iteration_num,
+            'diff_summary': diff_summary,
+            'test_results': test_results,
+            'new_sha': current_sha
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/v1/loop/generate_section_c/<session_id>', methods=['POST'])
+def generate_section_c(session_id):
+    """Generate Section C (Iteration Brief) for a vibe coder loop session"""
+    if session_id not in sessions:
+        return jsonify({'error': 'Invalid session ID'}), 404
+    
+    session = sessions[session_id]
+    
+    # Ensure we have at least one iteration
+    if not session.get('iterations'):
+        return jsonify({'error': 'No iterations available. Run /analyze_changes first.'}), 400
+    
+    try:
+        data = request.get_json() or {}
+        planner_output = data.get('planner_output')
+        user_feedback = data.get('user_feedback')
+        
+        # Create an instance of RepoToFileGenerator
+        from repo2file.dump_ultra import RepoToFileGenerator
+        repo2file_gen = RepoToFileGenerator()
+        
+        # Generate the iteration brief (Section C)
+        section_c_content = repo2file_gen.generate_iteration_brief(session, planner_output, user_feedback)
+        
+        # Save Section C to file  
+        iteration_num = len(session['iterations'])
+        session_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'session_{session_id}')
+        os.makedirs(session_dir, exist_ok=True)
+        
+        section_c_file = os.path.join(session_dir, f'iteration_{iteration_num}_section_c.txt')
+        with open(section_c_file, 'w') as f:
+            f.write(section_c_content)
+        
+        # Update the latest iteration with the file path
+        if session['iterations']:
+            session['iterations'][-1]['section_c_output_file'] = section_c_file
+        
+        # Update session phase
+        session['current_phase'] = 'section_c_generated'
+        
+        # Save full session data
+        save_session_data(session_id, session)
+        
+        return jsonify({
+            'success': True,
+            'section_c_content': section_c_content,
+            'file_path': section_c_file,
+            'iteration': iteration_num
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error generating Section C: {str(e)}")
+        session['current_phase'] = 'error_generating_section_c'
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/v1/loop/status/<session_id>', methods=['GET'])
+def get_loop_status(session_id):
+    """Get the current status of a vibe coder loop session"""
+    if session_id not in sessions:
+        return jsonify({'error': 'Invalid session ID'}), 404
+    
+    session = sessions[session_id]
+    
+    # Load full session data from file if available
+    session_data = load_session_data(session_id)
+    if session_data:
+        session = session_data
+    
+    # Prepare response data
+    response_data = {
+        'session_id': session_id,
+        'feature_vibe': session.get('feature_vibe', ''),
+        'repo_path': session.get('repo_path', ''),
+        'repo_type': session.get('repo_type', ''),
+        'current_phase': session.get('current_phase', 'uninitialized'),
+        'initial_sha': session.get('initial_sha', ''),
+        'current_sha': session.get('current_sha', ''),
+        'iterations': session.get('iterations', []),
+        'commit_history': session.get('commit_history', []),
+        'last_section_a': None,
+        'last_section_b': None
+    }
+    
+    # Try to load section files
+    session_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'session_{session_id}')
+    
+    # Load Section A content
+    section_a_file = os.path.join(session_dir, 'section_a.txt')
+    if os.path.exists(section_a_file):
+        with open(section_a_file, 'r') as f:
+            response_data['last_section_a'] = f.read()
+    
+    # Load Section B content  
+    section_b_file = os.path.join(session_dir, 'section_b.txt')
+    if os.path.exists(section_b_file):
+        with open(section_b_file, 'r') as f:
+            response_data['last_section_b'] = f.read()
+    
+    # Add Section C content from the last iteration
+    if response_data['iterations']:
+        last_iteration = response_data['iterations'][-1]
+        section_c_file = last_iteration.get('section_c_output_file')
+        if section_c_file and os.path.exists(section_c_file):
+            with open(section_c_file, 'r') as f:
+                last_iteration['section_c_content'] = f.read()
+    
+    return jsonify(response_data), 200
 
 @app.route('/process', methods=['POST'])
 def process():
@@ -1007,6 +1375,61 @@ def list_rules():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/detect-docker-compose', methods=['POST'])
+def detect_docker_compose():
+    """Detect docker-compose file in GitHub repository"""
+    try:
+        data = request.get_json()
+        repo_url = data.get('repo_url')
+        repo_branch = data.get('repo_branch')
+        
+        if not repo_url:
+            return jsonify({'error': 'Repository URL required'}), 400
+        
+        # Create a temporary directory to clone the repo
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Clone repository
+            try:
+                if repo_branch:
+                    subprocess.run(['git', 'clone', '-b', repo_branch, '--depth', '1', repo_url, temp_dir],
+                                 check=True, capture_output=True, text=True)
+                else:
+                    subprocess.run(['git', 'clone', '--depth', '1', repo_url, temp_dir],
+                                 check=True, capture_output=True, text=True)
+            except subprocess.CalledProcessError as e:
+                return jsonify({'error': f'Failed to clone repository: {e.stderr}'}), 400
+            
+            # Check for docker-compose files
+            compose_files = []
+            for filename in ['docker-compose.yml', 'docker-compose.yaml']:
+                filepath = os.path.join(temp_dir, filename)
+                if os.path.exists(filepath):
+                    compose_files.append(filename)
+                    
+                    # Parse the compose file for services
+                    try:
+                        import yaml
+                        with open(filepath, 'r') as f:
+                            compose_config = yaml.safe_load(f)
+                            services = list(compose_config.get('services', {}).keys())
+                            return jsonify({
+                                'has_compose': True,
+                                'compose_file': filename,
+                                'services': services
+                            })
+                    except Exception as e:
+                        return jsonify({
+                            'has_compose': True,
+                            'compose_file': filename,
+                            'services': [],
+                            'error': str(e)
+                        })
+            
+            return jsonify({'has_compose': False})
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/list-rule-templates')
 def list_rule_templates():
     """List available rule templates"""
@@ -1069,5 +1492,5 @@ def import_rule_template():
 
 if __name__ == '__main__':
     print("Starting BetterRepo2File UI server...")
-    print("Access the application at: http://localhost:5000")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    print("Access the application at: http://localhost:5001")
+    app.run(debug=True, host='0.0.0.0', port=5001)

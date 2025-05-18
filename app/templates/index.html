@@ -73,6 +73,10 @@
                             <span class="material-symbols-outlined">refresh</span>
                             Rerun Tests
                         </button>
+                        <button class="open-dashboard" title="Open Loop Dashboard" onclick="window.location.href='/loop-dashboard?session=' + window.unifiedState.sessionId">
+                            <span class="material-symbols-outlined">dashboard</span>
+                            Open Dashboard
+                        </button>
                     </div>
                     
                     <div class="commit-history">
@@ -111,19 +115,13 @@
                     <!-- Repository Selection -->
                     <div class="repo-selection-section">
                         <h4>Target Repository</h4>
-                        <nav class="tabs repo-tabs">
-                            <button class="tab-btn active" data-tab="repo-local-path">Local Path</button>
-                            <button class="tab-btn" data-tab="repo-github-url">GitHub URL</button>
-                        </nav>
-                        
-                        <div class="tab-content" id="repo-local-path">
-                            <label for="repoPathInput">Enter local repository path:</label>
-                            <input type="text" id="repoPathInput" placeholder="/path/to/your/local/repo" class="repo-input">
-                        </div>
-                        
-                        <div class="tab-content hidden" id="repo-github-url">
-                            <label for="githubUrlInputRepo">Enter GitHub repository URL:</label>
-                            <input type="text" id="githubUrlInputRepo" placeholder="https://github.com/username/repo" class="repo-input">
+                        <div class="github-repo-config">
+                            <label for="githubUrlInputRepo">GitHub Repository URL:</label>
+                            <input type="text" id="githubUrlInputRepo" placeholder="https://github.com/username/repo" class="repo-input" required>
+                            
+                            <label for="githubBranch">Branch (optional):</label>
+                            <input type="text" id="githubBranch" placeholder="main" class="repo-input">
+                            <p class="help-text">Leave blank to use the default branch</p>
                         </div>
                     </div>
                     
@@ -143,50 +141,33 @@
                     <button class="next-btn">Next →</button>
                 </div>
                 
-                <!-- Step 2: Repository Setup -->
+                <!-- Step 2: Test Configuration -->
                 <div class="wizard-content hidden" data-step="2">
-                    <h3>Repository Setup</h3>
+                    <h3>Test Configuration</h3>
+                    
+                    <!-- Test Command -->
+                    <div class="test-section">
+                        <label for="testCommand">Test Command:</label>
+                        <input type="text" id="testCommand" placeholder="npm test, pytest, go test, etc." class="test-input">
+                        <p class="help-text">Command to run your test suite (will be used for automated testing during the loop)</p>
+                    </div>
                     
                     <!-- Docker Integration -->
                     <div class="docker-section">
                         <label class="checkbox-label">
                             <input type="checkbox" id="useDocker">
-                            <span>Use Docker Compose (for local dev logs)</span>
+                            <span>Use Docker Compose for testing</span>
                         </label>
                         <div id="dockerConfig" class="docker-config hidden">
-                            <input type="file" id="composeFile" accept=".yml,.yaml">
-                            <label for="composeFile">Select docker-compose.yml</label>
-                            <div id="dockerServices" class="service-list"></div>
-                        </div>
-                    </div>
-
-                    <!-- Repository Selection -->
-                    <div class="repo-selection">
-                        <nav class="tabs">
-                            <button class="tab-btn active" data-tab="repo-upload">Upload Repo</button>
-                            <button class="tab-btn" data-tab="repo-github">GitHub URL</button>
-                            <button class="tab-btn" data-tab="repo-local">Local Path</button>
-                        </nav>
-
-                        <div class="tab-content" id="repo-upload">
-                            <div class="drop-area" id="dropArea">
-                                <div class="drop-message">
-                                    <span class="material-symbols-outlined">cloud_upload</span>
-                                    <p>Drag & drop repository ZIP or folder</p>
-                                    <label for="fileInput" class="file-input-label">Choose Files</label>
-                                    <input type="file" id="fileInput" accept=".zip" hidden>
-                                </div>
+                            <p class="help-text">Docker Compose will be automatically detected from your repository</p>
+                            <div class="docker-services-section hidden">
+                                <label>Available Services:</label>
+                                <div id="dockerServices" class="service-list"></div>
+                                <label for="dockerTestService">Service to run tests in:</label>
+                                <select id="dockerTestService" class="docker-select">
+                                    <option value="">Select a service</option>
+                                </select>
                             </div>
-                        </div>
-
-                        <div class="tab-content hidden" id="repo-github">
-                            <input type="url" id="githubUrl" placeholder="https://github.com/username/repo">
-                            <input type="text" id="githubBranch" placeholder="Branch (optional)">
-                        </div>
-
-                        <div class="tab-content hidden" id="repo-local">
-                            <input type="text" id="localPath" placeholder="/path/to/your/repository">
-                            <button class="browse-btn">Browse</button>
                         </div>
                     </div>
 
