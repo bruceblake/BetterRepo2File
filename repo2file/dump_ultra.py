@@ -110,15 +110,21 @@ class ManifestGenerator:
         self.action_block_generator = action_block_generator
     
     def generate_manifest(self, files: List['FileInfo'], codebase_analysis: Dict, 
-                         max_tokens: int = 5000) -> Tuple[str, Dict[str, int]]:
+                         max_tokens: int = 5000, file_offset_map: Dict[str, int] = None) -> Tuple[str, Dict[str, int]]:
         """Generate a hierarchical manifest with navigation aids
         
+        Args:
+            files: List of FileInfo objects
+            codebase_analysis: Analysis results
+            max_tokens: Maximum tokens for manifest
+            file_offset_map: Map of file paths to their token offsets in the output
+                           
         Returns:
             manifest_text: Markdown formatted manifest
             offset_map: Map of file paths to their token offset in the final output
         """
         manifest_lines = ["# Project Manifest", "", "## Table of Contents", ""]
-        offset_map = {}
+        offset_map = file_offset_map if file_offset_map else {}
         
         # Group files by directory/module
         file_groups = self._group_files_by_directory(files)
@@ -173,33 +179,44 @@ class ManifestGenerator:
                 if hasattr(file, 'query_relevance_score') and file.query_relevance_score > 0.3:
                     query_indicator = " 🎯"  # Target emoji to indicate query relevance
                 
+                # Add token location if available
+                token_location = ""
+                if rel_path in offset_map:
+                    token_location = f" (Token offset: {offset_map[rel_path]:,})"
+                
                 if summary:
-                    manifest_lines.append(f"- **{rel_path}** - {summary}{query_indicator}")
+                    manifest_lines.append(f"- **{rel_path}** - {summary}{query_indicator}{token_location}")
                 else:
-                    manifest_lines.append(f"- **{rel_path}**{query_indicator}")
+                    manifest_lines.append(f"- **{rel_path}**{query_indicator}{token_location}")
                 
                 # Add key exports/classes if available
                 if file.semantic_data and 'entities' in file.semantic_data:
                     key_entities = []
                     for entity in file.semantic_data['entities'][:5]:
-                        if entity.type in ['class', 'function', 'method']:
-                            key_entities.append(f"`{entity.name}`")
+                        entity_type = entity['type'] if isinstance(entity, dict) else entity.type
+                        entity_name = entity['name'] if isinstance(entity, dict) else entity.name
+                        if entity_type in ['class', 'function', 'method']:
+                            key_entities.append(f"`{entity_name}`")
                     
                     if key_entities:
                         manifest_lines.append(f"  - Key items: {', '.join(key_entities)}")
                     
                     # Add call graph information for important entities
                     for entity in file.semantic_data['entities'][:3]:  # Show top 3
-                        if entity.type in ['function', 'method'] and (entity.calls or entity.called_by):
-                            manifest_lines.append(f"  - `{entity.name}`:")
-                            if entity.calls:
+                        entity_type = entity['type'] if isinstance(entity, dict) else entity.type
+                        entity_name = entity['name'] if isinstance(entity, dict) else entity.name
+                        entity_calls = entity.get('calls', []) if isinstance(entity, dict) else entity.calls
+                        entity_called_by = entity.get('called_by', []) if isinstance(entity, dict) else entity.called_by
+                        if entity_type in ['function', 'method'] and (entity_calls or entity_called_by):
+                            manifest_lines.append(f"  - `{entity_name}`:")
+                            if entity_calls:
                                 # Only show calls that are also in our output context
-                                relevant_calls = [call for call in entity.calls[:5]]  # Limit to 5
+                                relevant_calls = [call for call in entity_calls[:5]]  # Limit to 5
                                 if relevant_calls:
                                     manifest_lines.append(f"    - Calls: {', '.join(relevant_calls)}")
-                            if entity.called_by:
+                            if entity_called_by:
                                 # Only show callers that are also in our output context
-                                relevant_callers = [caller for caller in entity.called_by[:5]]  # Limit to 5
+                                relevant_callers = [caller for caller in entity_called_by[:5]]  # Limit to 5
                                 if relevant_callers:
                                     manifest_lines.append(f"    - Called by: {', '.join(relevant_callers)}")
                 
@@ -792,7 +809,7 @@ class ContentProcessor:
                         if hasattr(entity, 'calls') and hasattr(entity, 'called_by'):
                             call_node = CallGraphNode(
                                 file=str(file_info.rel_path),
-                                entity=entity.qualified_name,
+                                entity=entity.name,
                                 entity_type=entity.type,
                                 calls=entity.calls or [],
                                 called_by=entity.called_by or []
@@ -911,9 +928,9 @@ class ContentProcessor:
                 line_index += 1
             
             # Add anchor for the entity
-            if hasattr(entity, 'qualified_name') and entity.qualified_name:
+            if hasattr(entity, 'name') and entity.name:
                 anchor_type = "FUNCTION" if entity.type == 'function' else "METHOD" if entity.type == 'method' else "CLASS"
-                anchored_lines.append(f"[[{anchor_type}_START: {entity.qualified_name}]]")
+                anchored_lines.append(f"[[{anchor_type}_START: {entity.name}]]")
             
             # Add the entity lines
             while line_index < entity.line_end and line_index < len(lines):
@@ -921,8 +938,8 @@ class ContentProcessor:
                 line_index += 1
                 
             # Add end anchor
-            if hasattr(entity, 'qualified_name') and entity.qualified_name:
-                anchored_lines.append(f"[[{anchor_type}_END: {entity.qualified_name}]]")
+            if hasattr(entity, 'name') and entity.name:
+                anchored_lines.append(f"[[{anchor_type}_END: {entity.name}]]")
         
         # Add remaining lines
         while line_index < len(lines):
@@ -1572,17 +1589,12 @@ class UltraRepo2File:
         self.token_manager.budget.reserve('header', header_tokens)
         output_parts.append(header)
         
-        # Generate manifest for large contexts (for Gemini 1.5 Pro)
+        # Reserve a placeholder for the manifest (we'll generate it after processing files)
+        manifest_placeholder_index = None
         if self.profile.generate_manifest and (self.profile.model == 'gemini-1.5-pro' or self.profile.token_budget > 500000):
-            print("\nGenerating hierarchical manifest...")
-            manifest_text, offset_map = self.manifest_generator.generate_manifest(files, codebase_analysis)
-            manifest_tokens = self.token_manager.count_tokens(manifest_text)
-            
-            if self.token_manager.budget.remaining >= manifest_tokens:
-                self.token_manager.budget.reserve('manifest', manifest_tokens)
-                output_parts.append(manifest_text)
-            else:
-                output_parts.append("[Manifest omitted due to token budget]")
+            print("\nReserving space for hierarchical manifest...")
+            output_parts.append("[MANIFEST_PLACEHOLDER]")
+            manifest_placeholder_index = len(output_parts) - 1
         
         # Add directory structure
         tree_structure = self._generate_tree_structure(repo_path, exclusion_spec)
@@ -1597,6 +1609,10 @@ class UltraRepo2File:
         # Process individual files
         output_parts.append("\nFile Contents:\n" + "="*50 + "\n")
         
+        # Track token offsets for each file
+        file_offset_map = {}
+        current_token_offset = sum(self.token_manager.count_tokens(part) for part in output_parts)
+        
         processed_count = 0
         for i, file_info in enumerate(files):
             if self.token_manager.budget.remaining < 1000:  # Reserve some tokens for footer
@@ -1608,6 +1624,9 @@ class UltraRepo2File:
                 self.token_manager.budget.remaining - 1000,
                 self.profile.max_file_size
             )
+            
+            # Track offset for this file
+            file_offset_map[str(file_info.rel_path)] = current_token_offset
             
             # Process file
             content, tokens_used = self.processor.process_file(file_info, remaining_budget)
@@ -1635,8 +1654,24 @@ class UltraRepo2File:
                     self.token_manager.budget.allocate(file_info.rel_path, file_tokens, file_info.importance_score)
                     processed_count += 1
                     
+                    # Update current offset for next file
+                    current_token_offset += file_tokens
+                    
                     if processed_count % 10 == 0:
                         print(f"Processed {processed_count} files...")
+        
+        # Generate manifest with accurate token offsets
+        if manifest_placeholder_index is not None:
+            print("\nGenerating hierarchical manifest with token locations...")
+            manifest_text, _ = self.manifest_generator.generate_manifest(
+                files, codebase_analysis, file_offset_map=file_offset_map)
+            manifest_tokens = self.token_manager.count_tokens(manifest_text)
+            
+            if self.token_manager.budget.remaining >= manifest_tokens:
+                self.token_manager.budget.reserve('manifest', manifest_tokens)
+                output_parts[manifest_placeholder_index] = manifest_text
+            else:
+                output_parts[manifest_placeholder_index] = "[Manifest omitted due to token budget]"
         
         # Add footer
         footer = self._generate_footer(codebase_analysis, processed_count, len(files))

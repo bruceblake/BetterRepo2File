@@ -1,7 +1,7 @@
 """AI Action Block generation and formatting for BetterRepo2File"""
 
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import json
 from pathlib import Path
@@ -21,8 +21,8 @@ class ActionBlockFormat(Enum):
 @dataclass
 class ActionBlock:
     """Base class for all action blocks"""
-    block_type: ActionBlockType
     file: str
+    block_type: ActionBlockType = field(init=False)  # Don't include in __init__
     
     def to_string(self) -> str:
         """Convert the action block to string format"""
@@ -58,9 +58,10 @@ class CallGraphNode(ActionBlock):
             "called_by": self.called_by
         }
 
-@dataclass
+@dataclass  
 class GitInsight(ActionBlock):
     """Git insight action block"""
+    # File is inherited from ActionBlock
     last_mod_date: str
     last_mod_author: str
     last_commit: str
