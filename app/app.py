@@ -227,6 +227,34 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
             # Stage C is for iteration planning (Gemini re-planning based on feedback)
             cmd = [python_executable, '-m', 'repo2file.dump_ultra', 'iterate']
             cmd.extend(['--current-repo-path', repo_path if repo_path else '.'])
+            
+            # We need the previous repo2file output from Stage B
+            if planner_output:
+                # Look for the previous output file
+                prev_output_file = os.path.join(job_folder, 'previous_output.txt')
+                with open(prev_output_file, 'w') as f:
+                    f.write(planner_output)
+                cmd.extend(['--previous-repo2file-output', prev_output_file])
+            else:
+                # Try to find a previous output file
+                # Check if there's an existing Stage B output in the same session
+                session_id = jobs.get(job_id, {}).get('session_id')
+                if session_id:
+                    for other_job_id, job_data in jobs.items():
+                        if job_data.get('session_id') == session_id and other_job_id != job_id:
+                            other_job_folder = os.path.join(app.config['UPLOAD_FOLDER'], f'job_{other_job_id}')
+                            stage_b_file = os.path.join(other_job_folder, f'output_{other_job_id}.txt')
+                            if os.path.exists(stage_b_file):
+                                cmd.extend(['--previous-repo2file-output', stage_b_file])
+                                print(f"Found previous Stage B output: {stage_b_file}")
+                                break
+                    else:
+                        # Fallback: create minimal previous output
+                        prev_output_file = os.path.join(job_folder, 'previous_output.txt')
+                        with open(prev_output_file, 'w') as f:
+                            f.write("# Previous Output\nNo previous output available.\n")
+                        cmd.extend(['--previous-repo2file-output', prev_output_file])
+            
             if feedback_log:
                 feedback_file = os.path.join(job_folder, 'feedback.log')
                 with open(feedback_file, 'w') as f:
@@ -1943,7 +1971,7 @@ def generate_context():
         repo_branch = data.get('repo_branch', 'main')
         vibe = data.get('vibe')
         stage = data.get('stage')
-        planner_output = data.get('planner_output', '')
+        planner_output = data.get('planner_output', '') or data.get('previous_planner_output', '')
         feedback_log = data.get('feedback_log', '')
         session_id = data.get('session_id', str(uuid.uuid4()))
         
