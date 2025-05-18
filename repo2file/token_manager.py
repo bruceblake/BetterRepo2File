@@ -11,6 +11,37 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import json
 
+# Model configurations with context windows
+MODEL_CONFIGS = {
+    # OpenAI models
+    'gpt-4': {'encoding': 'cl100k_base', 'max_tokens': 128000},
+    'gpt-4-turbo': {'encoding': 'cl100k_base', 'max_tokens': 128000},
+    'gpt-3.5-turbo': {'encoding': 'cl100k_base', 'max_tokens': 16385},
+    'gpt-3.5-turbo-16k': {'encoding': 'cl100k_base', 'max_tokens': 16385},
+    
+    # Anthropic Claude models
+    'claude-3': {'encoding': 'cl100k_base', 'max_tokens': 200000},
+    'claude-3-opus': {'encoding': 'cl100k_base', 'max_tokens': 200000},
+    'claude-3-sonnet': {'encoding': 'cl100k_base', 'max_tokens': 200000},
+    'claude-3-haiku': {'encoding': 'cl100k_base', 'max_tokens': 200000},
+    'claude-2': {'encoding': 'cl100k_base', 'max_tokens': 100000},
+    'claude-2.1': {'encoding': 'cl100k_base', 'max_tokens': 200000},
+    'claude-instant': {'encoding': 'cl100k_base', 'max_tokens': 100000},
+    'claude': {'encoding': 'cl100k_base', 'max_tokens': 100000},  # Default Claude
+    
+    # Google Gemini models
+    'gemini-1.5-pro': {'encoding': 'cl100k_base', 'max_tokens': 2000000},
+    'gemini-1.5-flash': {'encoding': 'cl100k_base', 'max_tokens': 1000000},
+    'gemini-1.0-pro': {'encoding': 'cl100k_base', 'max_tokens': 32000},
+    'gemini': {'encoding': 'cl100k_base', 'max_tokens': 1000000},  # Default Gemini
+    
+    # Meta Llama models
+    'llama': {'encoding': 'cl100k_base', 'max_tokens': 32000},
+    'llama-2': {'encoding': 'cl100k_base', 'max_tokens': 4096},
+    'llama-2-70b': {'encoding': 'cl100k_base', 'max_tokens': 4096},
+    'codellama': {'encoding': 'cl100k_base', 'max_tokens': 16384},
+}
+
 @dataclass
 class TokenAllocation:
     file_path: str
@@ -50,14 +81,28 @@ class TokenBudget:
         return allocation
 
 class TokenManager:
-    def __init__(self, model: str = "gpt-4", budget: int = 500000):
+    def __init__(self, model: str = "gpt-4", budget: int = None):
         self.model = model
         self.encoder = None
         
+        # Get model configuration
+        model_config = self._get_model_config(model)
+        self.model_max_tokens = model_config['max_tokens']
+        
+        # Set budget based on model if not provided
+        if budget is None:
+            # Use 50% of model's max tokens as default budget to leave room for prompts
+            budget = int(self.model_max_tokens * 0.5)
+        
+        # Ensure budget doesn't exceed model's max tokens
+        if budget > self.model_max_tokens:
+            print(f"Warning: Budget {budget} exceeds {model}'s max tokens {self.model_max_tokens}. Adjusting to {self.model_max_tokens * 0.5}")
+            budget = int(self.model_max_tokens * 0.5)
+        
         if TIKTOKEN_AVAILABLE:
             try:
-                # Special case for Gemini models which use the same encoding as GPT-4
-                if model.startswith('gemini'):
+                # Special case for non-OpenAI models which use the same encoding as GPT-4
+                if model.startswith(('gemini', 'claude', 'llama')):
                     self.encoder = tiktoken.get_encoding("cl100k_base")
                 else:
                     self.encoder = tiktoken.encoding_for_model(model)
@@ -70,6 +115,26 @@ class TokenManager:
         
         self.budget = TokenBudget(total=budget)
         self.cache: Dict[str, int] = {}
+    
+    def _get_model_config(self, model: str) -> Dict:
+        """Get model configuration with fallback"""
+        # First try exact match
+        if model in MODEL_CONFIGS:
+            return MODEL_CONFIGS[model]
+        
+        # Try prefix matching (e.g., 'claude-3-sonnet-20240219' -> 'claude-3-sonnet')
+        for key in MODEL_CONFIGS:
+            if model.startswith(key):
+                return MODEL_CONFIGS[key]
+        
+        # Try base model name (e.g., 'claude' for 'claude-3-xyz')
+        base_model = model.split('-')[0]
+        if base_model in MODEL_CONFIGS:
+            return MODEL_CONFIGS[base_model]
+        
+        # Default fallback
+        print(f"Warning: Unknown model '{model}', using default configuration")
+        return {'encoding': 'cl100k_base', 'max_tokens': 100000}
     
     def count_tokens(self, text: str, cache_key: Optional[str] = None) -> int:
         """Count tokens with caching support"""

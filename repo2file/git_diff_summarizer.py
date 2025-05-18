@@ -21,6 +21,8 @@ class DiffSummary:
     author: str
     timestamp: str
     test_results: Optional[Dict] = None
+    colored_diff: Optional[str] = None
+    detailed_changes: Optional[List[Dict]] = None
 
 class GitDiffSummarizer:
     """Analyzes git diffs and generates summaries"""
@@ -47,7 +49,7 @@ class GitDiffSummarizer:
             self.last_commit_sha = current_sha
         return has_new
     
-    def get_diff_summary(self, old_sha: Optional[str] = None, new_sha: str = 'HEAD') -> DiffSummary:
+    def get_diff_summary(self, old_sha: Optional[str] = None, new_sha: str = 'HEAD', color: bool = True) -> DiffSummary:
         """Get summary of changes between commits"""
         # Get commit info
         commit_info = self._get_commit_info(new_sha)
@@ -58,34 +60,51 @@ class GitDiffSummarizer:
         else:
             diff_range = f"{new_sha}^..{new_sha}"
         
-        # Get compact diff summary
-        compact_result = subprocess.run(
-            ['git', 'diff', '--compact-summary', diff_range],
+        # Get colored full diff for display
+        if color:
+            color_diff_result = subprocess.run(
+                ['git', 'diff', '--color=always', diff_range],
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True
+            )
+            colored_diff = color_diff_result.stdout
+        else:
+            colored_diff = None
+        
+        # Get detailed diff with stats per file
+        detailed_cmd = ['git', 'diff', '--numstat', diff_range]
+        detailed_result = subprocess.run(
+            detailed_cmd,
             cwd=self.repo_path,
             capture_output=True,
             text=True
         )
         
+        detailed_changes = []
         files_changed = []
         additions = 0
         deletions = 0
         
-        # Parse compact summary
-        for line in compact_result.stdout.splitlines():
-            if ' | ' in line:
-                parts = line.split(' | ')
-                if len(parts) >= 2:
-                    filename = parts[0].strip()
-                    files_changed.append(filename)
+        # Parse detailed changes
+        for line in detailed_result.stdout.splitlines():
+            if '\t' in line:
+                parts = line.split('\t')
+                if len(parts) >= 3:
+                    add_count = int(parts[0]) if parts[0] != '-' else 0
+                    del_count = int(parts[1]) if parts[1] != '-' else 0
+                    filename = parts[2]
                     
-                    # Parse additions/deletions
-                    stats = parts[1].strip()
-                    match = re.search(r'(\d+) \+', stats)
-                    if match:
-                        additions += int(match.group(1))
-                    match = re.search(r'(\d+) -', stats)
-                    if match:
-                        deletions += int(match.group(1))
+                    detailed_changes.append({
+                        'file': filename,
+                        'additions': add_count,
+                        'deletions': del_count,
+                        'status': self._get_file_status(diff_range, filename)
+                    })
+                    
+                    files_changed.append(filename)
+                    additions += add_count
+                    deletions += del_count
         
         # Get function changes
         functions_modified = self._get_modified_functions(diff_range)
@@ -102,7 +121,9 @@ class GitDiffSummarizer:
             commit_message=commit_info['message'],
             author=commit_info['author'],
             timestamp=commit_info['timestamp'],
-            test_results=test_results
+            test_results=test_results,
+            colored_diff=colored_diff,
+            detailed_changes=detailed_changes
         )
     
     def _get_commit_info(self, sha: str) -> Dict:
@@ -122,6 +143,21 @@ class GitDiffSummarizer:
             'author': lines[2],
             'timestamp': lines[3]
         }
+    
+    def _get_file_status(self, diff_range: str, filename: str) -> str:
+        """Get the status of a file (M: modified, A: added, D: deleted)"""
+        result = subprocess.run(
+            ['git', 'diff', '--name-status', diff_range],
+            cwd=self.repo_path,
+            capture_output=True,
+            text=True
+        )
+        
+        for line in result.stdout.splitlines():
+            if filename in line:
+                status = line.split('\t')[0]
+                return status
+        return 'M'  # Default to modified
     
     def _get_modified_functions(self, diff_range: str) -> List[str]:
         """Extract function names from the diff"""

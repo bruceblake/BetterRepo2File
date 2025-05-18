@@ -142,12 +142,67 @@ DEFAULT_PROFILES = {
         generate_manifest=True
     ),
     
-    'vibe_coder_gemini_claude': ProcessingProfile(
-        name='vibe_coder_gemini_claude',
-        description='Optimized for Vibe Coder workflow with Gemini 1.5 Pro (planning) and Claude (coding)',
+    'vibe_coder_gemini': ProcessingProfile(
+        name='vibe_coder_gemini',
+        description='Vibe Coder workflow - Gemini 1.5 Pro for planning (Stage A/C)',
         mode='ultra',
         model='gemini-1.5-pro',
-        token_budget=2000000,  # 2M tokens for vibe coder workflow (requirement F-3)
+        token_budget=None,  # Auto-set to 50% of model's context window
+        file_extensions=[],  # Include all by default  
+        exclude_patterns=[  # Noise suppression patterns (requirement N-1)
+            '.git/**', '*.png', '*.jpg', '*.jpeg', '*.gif', '*.svg', '*.ico',
+            '*.pyc', '*.pyo', '__pycache__/**', 'node_modules/**',
+            '*.pdf', '*.doc', '*.docx', 'venv/**', '.venv/**',
+            '*.zip', '*.tar', '*.gz', '*.7z', '*.exe', '*.dll', '*.so', '*.dylib',
+        ],
+        priority_patterns={
+            '*.py': 0.8,    # Boost Python files
+            '*.js': 0.7,    # Boost JavaScript
+            '*.ts': 0.7,    # Boost TypeScript
+            '*.jsx': 0.7,   # Boost React
+            '*.tsx': 0.7,   # Boost React + TypeScript
+            'app/*': 0.6,   # Boost app directory
+            'src/*': 0.6,   # Boost src directory
+        },
+        truncation_strategy='semantic',
+        generate_manifest=True,
+        max_file_size=1048576  # 1 MiB max file size
+    ),
+    
+    'vibe_coder_claude': ProcessingProfile(
+        name='vibe_coder_claude',
+        description='Vibe Coder workflow - Claude for coding (Stage B/D)',
+        mode='ultra',
+        model='claude-3-sonnet',
+        token_budget=None,  # Auto-set to 50% of model's context window
+        file_extensions=[],  # Include all by default  
+        exclude_patterns=[  # Noise suppression patterns (requirement N-1)
+            '.git/**', '*.png', '*.jpg', '*.jpeg', '*.gif', '*.svg', '*.ico',
+            '*.pyc', '*.pyo', '__pycache__/**', 'node_modules/**',
+            '*.pdf', '*.doc', '*.docx', 'venv/**', '.venv/**',
+            '*.zip', '*.tar', '*.gz', '*.7z', '*.exe', '*.dll', '*.so', '*.dylib',
+        ],
+        priority_patterns={
+            '*.py': 0.8,    # Boost Python files
+            '*.js': 0.7,    # Boost JavaScript
+            '*.ts': 0.7,    # Boost TypeScript
+            '*.jsx': 0.7,   # Boost React
+            '*.tsx': 0.7,   # Boost React + TypeScript
+            'app/*': 0.6,   # Boost app directory
+            'src/*': 0.6,   # Boost src directory
+        },
+        truncation_strategy='semantic',
+        generate_manifest=True,
+        max_file_size=1048576  # 1 MiB max file size
+    ),
+    
+    # Legacy alias for backward compatibility
+    'vibe_coder_gemini_claude': ProcessingProfile(
+        name='vibe_coder_gemini_claude',
+        description='Legacy: Use vibe_coder_gemini or vibe_coder_claude instead',
+        mode='ultra',
+        model='gemini-1.5-pro',
+        token_budget=None,  # Auto-set to 50% of model's context window
         file_extensions=[],  # Include all by default  
         exclude_patterns=[  # Noise suppression patterns (requirement N-1)
             '.git/**', '*.png', '*.jpg', '*.jpeg', '*.gif', '*.svg', '*.ico',

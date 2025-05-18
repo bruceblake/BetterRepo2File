@@ -1,52 +1,76 @@
-# Repo2File UI
+# BetterRepo2File (Vibe Coder)
 
-A web-based user interface for the [repo2file](https://github.com/artkulak/repo2file) tool, which consolidates repository contents or local files into a single text file for use with Large Language Models (LLMs).
+An advanced web-based workflow for AI-assisted software development using Gemini for planning and Claude for implementation. This tool consolidates repository contents into optimized contexts for Large Language Models (LLMs), providing a structured workflow from idea to implementation.
 
-## Features
+## 🚀 Features
 
-- Drag and drop files or folders
-- Process GitHub repositories via URL
-- Customizable file type filtering
-- Preview consolidated output in the browser
-- Download the output as a text file
-- Copy the output to clipboard
-- Multiple processing modes:
+### Core Workflow
+- **Vibe Coder Workflow**: A structured approach to AI development:
+  - **Stage A**: Initial planning with Gemini 1.5 Pro (2M context window)
+  - **Stage B**: Implementation with Claude 3 Sonnet (200k context window)
+  - **Stage C**: Iteration planning with Gemini based on test results and feedback
+  - **Stage D**: Iteration implementation with Claude for fixes and improvements
+
+### Advanced Capabilities
+- **Smart Model Selection**: Automatically uses the right LLM for each task
+  - Gemini 1.5 Pro for planning (utilizing massive 2M token context)
+  - Claude 3 Sonnet for coding (optimized for implementation tasks)
+- **Token Management**: 
+  - Automatic budget adjustment based on model capabilities
+  - Uses 50% of model's context window for safety
+  - Model-specific token counting with tiktoken
+- **Git Integration**:
+  - Colored diff output for better visibility
+  - Automatic test detection and execution
+  - Commit history tracking
+  - Function-level change analysis
+- **Multiple Processing Modes**:
   - **Standard Mode**: Basic file consolidation
-  - **Smart Mode**: AI-optimized with intelligent filtering and truncation
-  - **Token-Aware Mode**: Ultra-optimized with 500K token budget management
-  - **Ultra Mode**: Most advanced with exact token counting and semantic analysis
-- Automatic .gitignore pattern matching using pathspec
+  - **Smart Mode**: AI-optimized with intelligent filtering
+  - **Token-Aware Mode**: Budget-aware token management
+  - **Ultra Mode**: Advanced with exact token counting and semantic analysis
+
+### Technical Features
+- Drag and drop files or folders
+- Process GitHub repositories via URL with branch selection
+- Customizable file type filtering with profile-based defaults
+- Real-time progress tracking and logging
 - Binary file detection and exclusion
 - Lock file summarization
-- Priority-based file inclusion within token limits
-- Configuration profiles for common use cases
+- Priority-based file inclusion
+- Configuration profiles for different project types
 - REST API for programmatic access
-- Real-time preview capability
-- Multi-model support (GPT-4, GPT-3.5, Claude, Llama, Gemini 1.5 Pro)
-- Caching system for improved performance
 - Semantic code analysis with AST parsing
-- Parallel file processing
-- **Gemini 1.5 Pro Support**: Optimized profile with 1M token budget for large context windows ([detailed documentation](docs/GEMINI_FEATURES.md))
+- Parallel file processing with worker threads
+- Comprehensive error handling and recovery
 
 ## Installation
 
 1. Clone this repository:
-   ```
+   ```bash
    git clone https://github.com/yourusername/BetterRepo2File.git
    cd BetterRepo2File
    ```
 
-2. Install dependencies:
+2. Create a virtual environment (recommended):
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
+
+3. Install dependencies:
+   ```bash
    pip install -r requirements.txt
    ```
 
-3. Run the application:
-   ```
+4. Run the application:
+   ```bash
    python app/app.py
+   # OR use the run script:
+   ./run.sh
    ```
 
-4. Open your browser and navigate to:
+5. Open your browser and navigate to:
    ```
    http://localhost:5000
    ```

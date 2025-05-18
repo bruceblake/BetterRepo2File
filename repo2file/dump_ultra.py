@@ -40,14 +40,7 @@ DEFAULT_TOKEN_BUDGET = 500000
 CACHE_DIR = Path.home() / '.repo2file_cache'
 CACHE_EXPIRY_DAYS = 7
 
-# Model configurations
-MODEL_CONFIGS = {
-    'gpt-4': {'encoding': 'cl100k_base', 'max_tokens': 128000},
-    'gpt-3.5-turbo': {'encoding': 'cl100k_base', 'max_tokens': 16385},
-    'claude-3': {'encoding': 'cl100k_base', 'max_tokens': 200000},
-    'llama': {'encoding': 'cl100k_base', 'max_tokens': 32000},
-    'gemini-1.5-pro': {'encoding': 'cl100k_base', 'max_tokens': 2000000},
-}
+# Model configurations (moved to token_manager.py)
 
 # File type configurations
 BINARY_EXTENSIONS = {
@@ -1503,10 +1496,16 @@ class UltraRepo2File:
     """Main class for ultra-optimized repository processing"""
     def __init__(self, profile: ProcessingProfile):
         self.profile = profile
-        # Create a profile-specific cache key
-        profile_key = f"{profile.model}_{profile.token_budget}_{profile.truncation_strategy}"
-        self.cache = Cache(profile_key=profile_key)
+        # Create token manager with model-aware budgeting
         self.token_manager = TokenManager(model=profile.model, budget=profile.token_budget)
+        
+        # Create a profile-specific cache key using actual budget
+        profile_key = f"{profile.model}_{self.token_manager.budget.total}_{profile.truncation_strategy}"
+        self.cache = Cache(profile_key=profile_key)
+        
+        # Log actual token budget being used if it was adjusted
+        if profile.token_budget and profile.token_budget != self.token_manager.budget.total:
+            print(f"Note: Token budget adjusted from {profile.token_budget} to {self.token_manager.budget.total} based on {profile.model}'s context window")
         self.code_analyzer = CodeAnalyzer()
         self.git_analyzer = None  # Will be initialized when processing a git repo
         self.llm_augmenter = None  # Will be initialized if configured
@@ -1560,7 +1559,8 @@ class UltraRepo2File:
         
         print(f"Starting ultra-optimized processing...")
         print(f"Model: {self.profile.model}")
-        print(f"Token Budget: {self.profile.token_budget:,}")
+        print(f"Model Max Tokens: {self.token_manager.model_max_tokens:,}")
+        print(f"Token Budget: {self.token_manager.budget.total:,}")
         print(f"Repository: {repo_path}")
         print()
         
@@ -2164,66 +2164,74 @@ class UltraRepo2File:
             brief.append("")
         
         # Git diff summary
-        latest_iteration = session_data.get('iterations', [])[-1] if session_data.get('iterations') else None
-        if latest_iteration and latest_iteration.get('diff_summary'):
-            diff_summary = latest_iteration['diff_summary']
+        if self.git_analyzer and self.git_analyzer.is_git_repo():
+            from .git_diff_summarizer import GitDiffSummarizer
+            diff_summarizer = GitDiffSummarizer(repo_path)
+            
+            # Get colored diff summary
+            diff_summary = diff_summarizer.get_diff_summary(color=True)
+            
             brief.append("## GIT DIFF SUMMARY SINCE LAST PLANNING:")
-            brief.append(f"- Files changed: {len(diff_summary.get('changed_files', []))}")
-            brief.append(f"- Overall changes: {diff_summary.get('overall_summary_stats', 'N/A')}")
+            brief.append(f"- Files changed: {len(diff_summary.files_changed)}")
+            brief.append(f"- Overall changes: +{diff_summary.additions} -{diff_summary.deletions}")
+            brief.append(f"- Author: {diff_summary.author}")
+            brief.append(f"- Last commit: {diff_summary.commit_message}")
             brief.append("")
             
-            if diff_summary.get('changed_files'):
+            # Add colored diff preview if available
+            if diff_summary.colored_diff:
+                brief.append("### Colored Diff Preview (first 1000 lines):")
+                brief.append("```diff")
+                # Limit to first 1000 lines to avoid token overflow
+                diff_lines = diff_summary.colored_diff.splitlines()[:1000]
+                brief.extend(diff_lines)
+                if len(diff_summary.colored_diff.splitlines()) > 1000:
+                    brief.append("... (truncated)")
+                brief.append("```")
+                brief.append("")
+            
+            if diff_summary.detailed_changes:
                 brief.append("### Modified Files:")
-                for file_info in diff_summary['changed_files'][:10]:  # Limit to top 10
+                for file_info in diff_summary.detailed_changes[:10]:  # Limit to top 10
                     file_path = file_info.get('file', '')
                     status = file_info.get('status', 'M')
                     insertions = file_info.get('insertions', 0)
                     deletions = file_info.get('deletions', 0)
                     brief.append(f"- {file_path} [{status}] +{insertions}/-{deletions}")
-                if len(diff_summary['changed_files']) > 10:
-                    brief.append(f"- ... and {len(diff_summary['changed_files']) - 10} more files")
+                if len(diff_summary.detailed_changes) > 10:
+                    brief.append(f"- ... and {len(diff_summary.detailed_changes) - 10} more files")
                 brief.append("")
             
-            if diff_summary.get('key_modified_functions'):
+            if diff_summary.functions_modified:
                 brief.append("### Key Modified Functions:")
-                for func_info in diff_summary['key_modified_functions'][:10]:
-                    if isinstance(func_info, dict):
-                        file_name = func_info.get('file', 'unknown')
-                        func_name = func_info.get('function', 'unknown')
-                        change_type = func_info.get('change_type', 'modified')
-                        brief.append(f"- {file_name}: {func_name} ({change_type})")
-                    else:
-                        brief.append(f"- {func_info}")
-                if len(diff_summary['key_modified_functions']) > 10:
-                    brief.append(f"- ... and {len(diff_summary['key_modified_functions']) - 10} more functions")
+                for func_name in diff_summary.functions_modified[:10]:
+                    brief.append(f"- {func_name}")
+                if len(diff_summary.functions_modified) > 10:
+                    brief.append(f"- ... and {len(diff_summary.functions_modified) - 10} more functions")
                 brief.append("")
         
-        # Test Results Diff
-        if latest_iteration and latest_iteration.get('test_results'):
-            test_results = latest_iteration['test_results']
-            brief.append("## TEST RESULTS DIFF:")
+        # Test Results if available
+        if diff_summary.test_results:
+            test_results = diff_summary.test_results
+            brief.append("## TEST RESULTS:")
             
             if test_results.get('passed') is not None:
                 brief.append(f"- Status: {'✅ PASSED' if test_results['passed'] else '❌ FAILED'}")
             
-            if test_results.get('summary'):
-                brief.append(f"- Summary: {test_results['summary']}")
+            if test_results.get('total'):
+                brief.append(f"- Total: {test_results['total']} tests")
+                if test_results.get('failed'):
+                    brief.append(f"- Failed: {test_results['failed']} tests")
             
-            if test_results.get('command'):
-                brief.append(f"- Command: {test_results['command']}")
-            
-            if test_results.get('elapsed_time'):
-                brief.append(f"- Duration: {test_results['elapsed_time']:.2f}s")
-            
-            if test_results.get('error'):
-                brief.append(f"- Error: {test_results['error']}")
+            if test_results.get('framework'):
+                brief.append(f"- Framework: {test_results['framework']}")
             
             brief.append("")
         
         # Previous planning context (truncated)
-        if session_data.get("last_gemini_plan"):
+        if session_data.get("planner_output"):
             brief.append("## PREVIOUS PLANNING CONTEXT (Summary):")
-            plan_lines = session_data["last_gemini_plan"].split('\n')
+            plan_lines = session_data["planner_output"].split('\n')
             # Extract first 20 lines or until we find a section header
             summary_lines = []
             for i, line in enumerate(plan_lines[:50]):
@@ -2239,8 +2247,8 @@ class UltraRepo2File:
         brief.append("")
         
         # Generate focused snapshot of changed files
-        if latest_iteration and latest_iteration.get('diff_summary'):
-            changed_files = [f['file'] for f in latest_iteration['diff_summary'].get('changed_files', [])]
+        if diff_summary.detailed_changes:
+            changed_files = [f['file'] for f in diff_summary.detailed_changes]
             
             # Add files mentioned in user feedback
             if user_feedback:
@@ -2333,11 +2341,11 @@ def main_iterate():
             with open(user_feedback_file, 'r') as f:
                 user_feedback = f.read()
         
-        # Create processor with default profile
+        # Create processor with Gemini profile (for iteration planning)
         profile = ProcessingProfile(
             name="iteration",
-            token_budget=500000,
-            model="claude-3",
+            token_budget=None,  # Will auto-detect based on model
+            model="gemini-1.5-pro",  # Use Gemini for iteration planning
             enable_git_insights=True
         )
         processor = UltraRepo2File(profile)

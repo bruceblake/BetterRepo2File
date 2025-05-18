@@ -328,6 +328,10 @@ class WorkflowController {
             return;
         }
         
+        // Show model info for Gemini planner (Stage A)
+        const modelInfo = 'Stage A uses Gemini 1.5 Pro (Context: 2M tokens, Budget: 1M tokens)';
+        console.log(modelInfo);
+        
         this.showProgress('Cloning repository from GitHub...', 'Repository Setup', 1);
         this.updateProgressBar(0);
         this.addProgressDetail('repo', this.state.repoUrl.split('/').slice(-1)[0]);
@@ -377,6 +381,10 @@ class WorkflowController {
             return;
         }
         
+        // Show model info for Claude coder (Stage B)
+        const modelInfo = 'Stage B uses Claude 3 Sonnet (Context: 200k tokens, Budget: 100k tokens)';
+        console.log(modelInfo);
+        
         this.showProgress('Processing AI planner output...', 'Context Generation', 2);
         this.updateProgressBar(30);
         
@@ -416,6 +424,10 @@ class WorkflowController {
         
         // Store feedback for later use
         this.state.feedbackText = feedbackText;
+        
+        // Show model info for Gemini iteration planning (Stage C)
+        const modelInfo = 'Stage C uses Gemini 1.5 Pro (Context: 2M tokens, Budget: 1M tokens)';
+        console.log(modelInfo);
         
         this.showProgress('Analyzing feedback and generating update context...', 'Iteration Planning', 3);
         this.updateProgressBar(60);

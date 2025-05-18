@@ -220,8 +220,9 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
             with open(planner_file, 'w') as f:
                 f.write(planner_output)
             cmd.extend(['--planner', planner_file])
-            # Claude has a smaller context window (~100k tokens)
-            cmd.extend(['--budget', '90000'])
+            # Let the token manager handle budget automatically based on model
+            # Since stage B uses Claude, it will automatically use a smaller budget
+            # Note: We can still override if needed with --budget
         
         elif stage == 'C':
             # Stage C is for iteration planning (Gemini re-planning based on feedback)
@@ -261,8 +262,7 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
                     f.write(feedback_log)
                 cmd.extend(['--user-feedback-file', feedback_file])
             cmd.extend(['--output', output_path])
-            # Use higher token budget for planning
-            cmd.extend(['--budget', '1000000'])
+            # Let token manager handle budgeting - Gemini supports up to 2M tokens
             
         elif stage == 'D':
             # Stage D is for iteration coding (Claude implementation of updated plan)
@@ -289,15 +289,65 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
                     f.write(feedback_log)
                 cmd.extend(['--feedback', feedback_file])
             
-            # Claude has a smaller context window
-            cmd.extend(['--budget', '90000'])
+            # Let token manager handle budgeting - will auto-detect Claude's limits
         
         
-        # Run the analysis
+        # Run the analysis with proper error handling
         print(f"Running command: {' '.join(cmd)}")
+        log_step("Executing repo2file command", {"command": ' '.join(cmd), "stage": stage})
+        
         # Set the working directory to the project root so modules can be found
         working_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        process = subprocess.run(cmd, capture_output=True, text=True, cwd=working_dir)
+        
+        try:
+            # Use subprocess with separate pipes to avoid buffer issues
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=working_dir,
+                bufsize=1
+            )
+            
+            # Read output in real-time to avoid buffer overflow
+            stdout_lines = []
+            stderr_lines = []
+            
+            # Use communicate() to avoid deadlock
+            stdout, stderr = process.communicate(timeout=600)
+            
+            if stdout:
+                stdout_lines = stdout.splitlines()
+            if stderr:
+                stderr_lines = stderr.splitlines()
+            
+            process_return_code = process.returncode
+            
+        except subprocess.TimeoutExpired:
+            log_error("Command timed out after 10 minutes", None)
+            process.terminate()
+            process.wait()
+            raise Exception("Process timed out after 10 minutes")
+        except Exception as e:
+            log_error(f"Failed to run command: {str(e)}", e)
+            if 'process' in locals():
+                process.terminate()
+                process.wait()
+            raise Exception(f"Failed to run process: {str(e)}")
+        
+        # Create a result object similar to subprocess.run
+        class Result:
+            def __init__(self, returncode, stdout, stderr):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+        
+        process = Result(
+            returncode=process_return_code,
+            stdout='\n'.join(stdout_lines) if stdout_lines else stdout,
+            stderr='\n'.join(stderr_lines) if stderr_lines else stderr
+        )
         
         print(f"Process return code: {process.returncode}")
         if process.stdout:
@@ -311,9 +361,17 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
             error_msg = f"Repo2File failed with return code {process.returncode}"
             if process.stderr:
                 error_msg += f"\nStderr: {process.stderr}"
+                # Check for specific error patterns
+                if "Broken pipe" in process.stderr:
+                    error_msg = "Connection to subprocess was lost. This may be due to resource constraints."
+                elif "No module named" in process.stderr:
+                    error_msg = "Missing Python module. Ensure all dependencies are installed."
             if process.stdout:
                 error_msg += f"\nStdout: {process.stdout}"
             print(error_msg)
+            log_error(f"Command returned non-zero exit code: {process.returncode}", None)
+            log_step("Command stderr", {"stderr": process.stderr[:500] if process.stderr else "None"})
+            log_step("Command stdout", {"stdout": process.stdout[:500] if process.stdout else "None"})
             raise Exception(error_msg)
         
         send_progress(job_id, 'finalizing', 100, 100)
