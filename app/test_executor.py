@@ -5,7 +5,10 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import re
-from .logger import get_logger, log_step, log_metric, log_error
+if __name__ == '__main__':
+    from logger import get_logger, log_step, log_metric, log_error
+else:
+    from .logger import get_logger, log_step, log_metric, log_error
 
 class TestExecutor:
     """Execute user's tests with detailed output and metrics"""
