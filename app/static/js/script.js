@@ -17,9 +17,40 @@ class WorkflowController {
     
     init() {
         this.attachEventListeners();
+        this.cleanupOldData();
         this.loadSavedState();
         this.updateProgressIndicator();
         this.showStep(this.state.currentStep); // Make sure the current step is visible
+    }
+    
+    cleanupOldData() {
+        try {
+            // Check localStorage size and clean if necessary
+            let totalSize = 0;
+            for (let key in localStorage) {
+                if (localStorage.hasOwnProperty(key)) {
+                    totalSize += localStorage[key].length + key.length;
+                }
+            }
+            
+            console.log('Current localStorage size:', (totalSize / 1024 / 1024).toFixed(2), 'MB');
+            
+            // If over 4MB (localStorage limit is usually 5MB)
+            if (totalSize > 4 * 1024 * 1024) {
+                console.log('Cleaning up localStorage...');
+                this.clearOldStorageData();
+                // Check size again after cleanup
+                totalSize = 0;
+                for (let key in localStorage) {
+                    if (localStorage.hasOwnProperty(key)) {
+                        totalSize += localStorage[key].length + key.length;
+                    }
+                }
+                console.log('Size after cleanup:', (totalSize / 1024 / 1024).toFixed(2), 'MB');
+            }
+        } catch (e) {
+            console.error('Error checking storage size:', e);
+        }
     }
     
     attachEventListeners() {
@@ -56,21 +87,91 @@ class WorkflowController {
             this.saveState();
         });
         
+        // Don't save large planner output to state
         document.getElementById('plannerOutput')?.addEventListener('input', (e) => {
-            this.state.plannerOutput = e.target.value;
-            this.saveState();
+            // Just keep it in the textarea, don't save to state to avoid quota issues
         });
     }
     
     saveState() {
-        localStorage.setItem('workflowState', JSON.stringify(this.state));
+        try {
+            // Create a minimal state object to save space
+            const minimalState = {
+                repoUrl: this.state.repoUrl,
+                branch: this.state.branch,
+                vibe: this.state.vibe?.substring(0, 1000),  // Limit vibe to 1000 chars
+                currentStep: this.state.currentStep,
+                sessionId: this.state.sessionId,
+                refinedVibe: this.state.refinedVibe?.substring(0, 1000),  // Limit refined vibe
+                // Don't save large outputs or job data
+            };
+            
+            localStorage.setItem('workflowState', JSON.stringify(minimalState));
+        } catch (e) {
+            if (e.name === 'QuotaExceededError') {
+                console.warn('localStorage quota exceeded, clearing old data');
+                // Clear old data and try again
+                this.clearOldStorageData();
+                try {
+                    const essentialState = {
+                        repoUrl: this.state.repoUrl,
+                        branch: this.state.branch,
+                        currentStep: this.state.currentStep,
+                        sessionId: this.state.sessionId
+                    };
+                    localStorage.setItem('workflowState', JSON.stringify(essentialState));
+                } catch (e2) {
+                    console.error('Failed to save state even after cleanup:', e2);
+                }
+            } else {
+                console.error('Error saving state:', e);
+            }
+        }
+    }
+    
+    clearOldStorageData() {
+        // Clear items that might be taking up space
+        const keysToCheck = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('workflow') && key !== 'workflowState') {
+                keysToCheck.push(key);
+            }
+        }
+        
+        // Remove old workflow data
+        keysToCheck.forEach(key => {
+            try {
+                localStorage.removeItem(key);
+            } catch (e) {
+                console.error('Error removing key:', key, e);
+            }
+        });
     }
     
     loadSavedState() {
-        const saved = localStorage.getItem('workflowState');
-        if (saved) {
-            this.state = { ...this.state, ...JSON.parse(saved) };
-            this.restoreInputs();
+        try {
+            const saved = localStorage.getItem('workflowState');
+            if (saved) {
+                const savedState = JSON.parse(saved);
+                // Only restore essential fields to avoid memory issues
+                this.state.repoUrl = savedState.repoUrl || '';
+                this.state.branch = savedState.branch || 'main';
+                this.state.vibe = savedState.vibe || '';
+                this.state.currentStep = savedState.currentStep || 1;
+                this.state.sessionId = savedState.sessionId || null;
+                this.state.refinedVibe = savedState.refinedVibe || '';
+                
+                this.restoreInputs();
+            }
+        } catch (e) {
+            console.error('Error loading saved state:', e);
+            // If there's an error, clear the corrupted data
+            try {
+                localStorage.removeItem('workflowState');
+            } catch (e2) {
+                console.error('Error clearing corrupted state:', e2);
+            }
         }
     }
     
@@ -126,13 +227,75 @@ class WorkflowController {
         this.saveState();
     }
     
-    showProgress(message) {
+    showProgress(message, title = 'Processing...', step = null) {
         const overlay = document.getElementById('progressOverlay');
         const msgElement = document.getElementById('progressMessage');
+        const titleElement = document.getElementById('progressTitle');
+        const progressIcon = document.getElementById('progressIcon');
         
-        if (overlay && msgElement) {
-            msgElement.textContent = message;
+        if (overlay) {
+            // Update main message and title
+            if (msgElement) msgElement.textContent = message;
+            if (titleElement) titleElement.textContent = title;
+            
+            // Update icon based on step
+            if (progressIcon) {
+                const icons = {
+                    1: 'cloud_download',
+                    2: 'analytics',
+                    3: 'psychology',
+                    4: 'description',
+                    'clone': 'cloud_download',
+                    'analyze': 'analytics',
+                    'generate': 'psychology',
+                    'finalize': 'description',
+                    'error': 'error',
+                    'success': 'check_circle'
+                };
+                progressIcon.textContent = icons[step] || 'hourglass_top';
+                
+                // Add animation classes for success/error
+                progressIcon.className = 'material-symbols-outlined progress-icon-symbol';
+                if (step === 'success') {
+                    progressIcon.classList.add('success');
+                } else if (step === 'error') {
+                    progressIcon.classList.add('error');
+                }
+            }
+            
+            // Update progress steps
+            const steps = document.querySelectorAll('.progress-step');
+            steps.forEach((stepEl, index) => {
+                if (step && typeof step === 'number') {
+                    if (index + 1 < step) {
+                        stepEl.classList.add('completed');
+                        stepEl.classList.remove('active');
+                    } else if (index + 1 === step) {
+                        stepEl.classList.add('active');
+                        stepEl.classList.remove('completed');
+                    } else {
+                        stepEl.classList.remove('active', 'completed');
+                    }
+                }
+            });
+            
             overlay.classList.remove('hidden');
+        }
+    }
+    
+    updateProgressBar(percent) {
+        const progressBar = document.getElementById('progressBar');
+        if (progressBar) {
+            progressBar.style.width = `${percent}%`;
+        }
+    }
+    
+    addProgressDetail(type, text) {
+        const detailItem = document.getElementById(`${type}Detail`);
+        if (detailItem) {
+            detailItem.classList.remove('hidden');
+            const textEl = detailItem.querySelector('.detail-text');
+            if (textEl) textEl.textContent = text;
         }
     }
     
@@ -152,7 +315,9 @@ class WorkflowController {
             return;
         }
         
-        this.showProgress('Cloning repository and generating context...');
+        this.showProgress('Cloning repository from GitHub...', 'Repository Setup', 1);
+        this.updateProgressBar(0);
+        this.addProgressDetail('repo', this.state.repoUrl.split('/').slice(-1)[0]);
         
         try {
             console.log('Sending request to /api/generate_context');
@@ -193,12 +358,14 @@ class WorkflowController {
     }
     
     async generateCoderContext() {
-        if (!this.state.plannerOutput) {
+        const plannerOutput = document.getElementById('plannerOutput').value;
+        if (!plannerOutput) {
             alert('Please paste the AI planner output first');
             return;
         }
         
-        this.showProgress('Generating implementation context...');
+        this.showProgress('Processing AI planner output...', 'Context Generation', 2);
+        this.updateProgressBar(30);
         
         try {
             const response = await fetch('/api/generate_context', {
@@ -209,7 +376,7 @@ class WorkflowController {
                     repo_branch: this.state.branch,
                     vibe: this.state.vibe,
                     stage: 'B',
-                    planner_output: this.state.plannerOutput
+                    planner_output: plannerOutput
                 })
             });
             
@@ -237,7 +404,8 @@ class WorkflowController {
         // Store feedback for later use
         this.state.feedbackText = feedbackText;
         
-        this.showProgress('Generating context for Gemini re-planning...');
+        this.showProgress('Analyzing feedback and generating update context...', 'Iteration Planning', 3);
+        this.updateProgressBar(60);
         
         try {
             // First, generate context for Gemini to re-plan based on feedback
@@ -250,7 +418,7 @@ class WorkflowController {
                     vibe: this.state.vibe,
                     stage: 'C',  // Stage C for iteration
                     feedback_log: feedbackText,
-                    previous_planner_output: this.state.plannerOutput,
+                    previous_planner_output: document.getElementById('plannerOutput')?.value || '',
                     session_id: this.state.sessionId
                 })
             });
@@ -273,22 +441,57 @@ class WorkflowController {
         if (!this.state.jobId) return;
         
         const eventSource = new EventSource(`/api/job_status/${this.state.jobId}`);
+        let progressPercent = 0;
+        const progressMap = {
+            'extracting': { step: 1, percent: 10, message: 'Cloning repository and extracting files...' },
+            'analyzing': { step: 2, percent: 40, message: 'Analyzing code structure and patterns...' },
+            'processing': { step: 3, percent: 70, message: 'AI is processing your request...' },
+            'finalizing': { step: 4, percent: 90, message: 'Generating final output...' }
+        };
         
         eventSource.onmessage = (event) => {
             const data = JSON.parse(event.data);
             
             if (data.phase) {
-                this.showProgress(data.phase.charAt(0).toUpperCase() + data.phase.slice(1) + '...');
+                const progress = progressMap[data.phase.toLowerCase()] || {};
+                const step = progress.step || null;
+                const percent = progress.percent || progressPercent;
+                const message = progress.message || data.phase.charAt(0).toUpperCase() + data.phase.slice(1) + '...';
+                
+                // Update progress display
+                if (step) {
+                    this.showProgress(message, null, step);
+                } else {
+                    this.showProgress(message);
+                }
+                
+                // Animate progress bar
+                if (percent > progressPercent) {
+                    progressPercent = percent;
+                    this.updateProgressBar(percent);
+                }
+                
+                // Add progress details
+                if (data.current && data.total) {
+                    this.addProgressDetail('files', `Processing ${data.current} of ${data.total} files`);
+                }
             }
             
             if (data.status === 'completed') {
                 eventSource.close();
-                this.displayResults(data.result);
-                this.hideProgress();
+                this.updateProgressBar(100);
+                this.showProgress('Processing complete!', 'Success', 'success');
+                setTimeout(() => {
+                    this.displayResults(data.result);
+                    this.hideProgress();
+                }, 1000);
             } else if (data.error) {
                 eventSource.close();
-                alert('Error: ' + data.error);
-                this.hideProgress();
+                this.showProgress('An error occurred: ' + data.error, 'Error', 'error');
+                setTimeout(() => {
+                    alert('Error: ' + data.error);
+                    this.hideProgress();
+                }, 2000);
             }
         };
         
@@ -343,7 +546,7 @@ class WorkflowController {
             return;
         }
         
-        this.state.iterationPlannerOutput = iterationPlannerInput;
+        // Don't store large output in state
         this.showProgress('Generating implementation context for Claude...');
         
         try {
@@ -439,15 +642,30 @@ class WorkflowController {
 }
 
 // Test Runner Functions
+async function checkDockerAvailable() {
+    try {
+        const response = await fetch('/api/check-docker');
+        const data = await response.json();
+        return data.can_use_docker || false;
+    } catch (error) {
+        console.error('Error checking Docker availability:', error);
+        return false;
+    }
+}
+
 async function runTests() {
     const testBtn = event.target;
     testBtn.disabled = true;
     testBtn.innerHTML = '<span class="material-symbols-outlined">pending</span> Running...';
     
     try {
+        // Always try to use Docker if available
+        let useDocker = true; // Default to true for WSL/Docker environments
+        
         console.log('Running tests with:', {
             repo_path: window.workflow.state.repoUrl,
-            session_id: window.workflow.state.sessionId
+            session_id: window.workflow.state.sessionId,
+            use_docker: useDocker
         });
         
         const response = await fetch('/api/run-tests', {
@@ -455,7 +673,9 @@ async function runTests() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 repo_path: window.workflow.state.repoUrl,
-                session_id: window.workflow.state.sessionId
+                session_id: window.workflow.state.sessionId,
+                use_docker: useDocker,
+                framework: 'auto'  // Let backend auto-detect
             })
         });
         
@@ -505,7 +725,23 @@ function displayTestResults(results) {
                     ${failed > 0 ? `<span class="failed">✗ ${failed} failed</span>` : ''}
                     <span class="total">${total} total</span>
                 </div>
-                ${results.framework ? `<div class="test-framework">Framework: ${results.framework}</div>` : ''}
+                <div class="test-info">
+                    ${results.framework ? `<div class="test-framework">Framework: ${results.framework}</div>` : ''}
+                    ${results.docker ? `<div class="test-docker">✓ Ran in Docker container</div>` : ''}
+                </div>
+                ${results.details && results.details.length > 0 ? `
+                    <details class="test-details">
+                        <summary>Test Details</summary>
+                        <ul>
+                            ${results.details.map(test => `
+                                <li class="${test.outcome}">
+                                    <span class="test-name">${test.name}</span>
+                                    <span class="test-duration">${(test.duration || 0).toFixed(3)}s</span>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </details>
+                ` : ''}
             </div>
             ${results.output ? `<pre class="test-output">${results.output}</pre>` : ''}
         `;

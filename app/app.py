@@ -1207,6 +1207,7 @@ def run_tests():
         repo_path = data.get('repo_path', '.')
         session_id = data.get('session_id')
         test_framework = data.get('framework', 'auto')  # auto-detect by default
+        use_docker = data.get('use_docker', None)  # None = auto-detect
         
         print(f"Test runner - Initial repo_path: {repo_path}, session_id: {session_id}")
         
@@ -1257,8 +1258,145 @@ def run_tests():
         
         print(f"Test runner - Final repo_path: {repo_path}")
         
-        # Test running logic
+        # Check Docker availability
+        docker_available = False
+        has_dockerfile = False
+        has_compose = False
         
+        try:
+            # Check if Docker is available
+            docker_check = subprocess.run(['docker', '--version'], capture_output=True, text=True)
+            docker_available = docker_check.returncode == 0
+            
+            if docker_available:
+                print(f"Docker is available: {docker_check.stdout.strip()}")
+                
+                # Check for existing Docker files in the repo
+                dockerfile_path = os.path.join(repo_path, 'Dockerfile')
+                compose_path = os.path.join(repo_path, 'docker-compose.yml')
+                compose_alt_path = os.path.join(repo_path, 'docker-compose.yaml')
+                
+                has_dockerfile = os.path.exists(dockerfile_path)
+                has_compose = os.path.exists(compose_path) or os.path.exists(compose_alt_path)
+                
+                print(f"Dockerfile exists: {has_dockerfile}, docker-compose exists: {has_compose}")
+        except Exception as e:
+            print(f"Docker check error: {e}")
+        
+        # Use Docker if requested or if available and repo has Docker setup
+        if use_docker or (docker_available and (has_dockerfile or has_compose)):
+            if not docker_available:
+                return jsonify({'error': 'Docker requested but not available'}), 400
+                
+            print(f"Using Docker for tests")
+            
+            # Build and run tests in Docker
+            try:
+                if has_compose:
+                    # Use docker-compose
+                    compose_file = 'docker-compose.yml' if os.path.exists(os.path.join(repo_path, 'docker-compose.yml')) else 'docker-compose.yaml'
+                    
+                    # Check if there's a test service
+                    compose_check = subprocess.run(
+                        ['docker-compose', '-f', compose_file, 'config'],
+                        cwd=repo_path,
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    # Run tests with docker-compose
+                    cmd = ['docker-compose', '-f', compose_file, 'run', '--rm', 'test']
+                    if 'test' not in compose_check.stdout:
+                        # Try default service name or app
+                        cmd = ['docker-compose', '-f', compose_file, 'run', '--rm', 'app', 'npm', 'test']
+                    
+                    result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, timeout=600)
+                    
+                elif has_dockerfile:
+                    # Build Docker image
+                    image_name = f"test-{uuid.uuid4().hex[:8]}"
+                    build_cmd = ['docker', 'build', '-t', image_name, '.']
+                    build_result = subprocess.run(build_cmd, cwd=repo_path, capture_output=True, text=True)
+                    
+                    if build_result.returncode != 0:
+                        return jsonify({'error': f'Docker build failed: {build_result.stderr}'}), 500
+                    
+                    # Run tests in container
+                    # Try to detect test command from Dockerfile
+                    test_cmd = None
+                    with open(dockerfile_path, 'r') as f:
+                        dockerfile_content = f.read()
+                        if 'RUN npm test' in dockerfile_content or 'CMD ["npm", "test"]' in dockerfile_content:
+                            test_cmd = ['npm', 'test']
+                        elif 'RUN pytest' in dockerfile_content or 'CMD ["pytest"]' in dockerfile_content:
+                            test_cmd = ['pytest']
+                        elif 'RUN go test' in dockerfile_content:
+                            test_cmd = ['go', 'test', './...']
+                    
+                    if not test_cmd:
+                        # Default based on detected files
+                        if os.path.exists(os.path.join(repo_path, 'package.json')):
+                            test_cmd = ['npm', 'test']
+                        elif os.path.exists(os.path.join(repo_path, 'requirements.txt')):
+                            test_cmd = ['pytest']
+                        elif os.path.exists(os.path.join(repo_path, 'go.mod')):
+                            test_cmd = ['go', 'test', './...']
+                        else:
+                            test_cmd = ['echo', 'No test command found']
+                    
+                    run_cmd = ['docker', 'run', '--rm', image_name] + test_cmd
+                    result = subprocess.run(run_cmd, cwd=repo_path, capture_output=True, text=True, timeout=600)
+                    
+                    # Cleanup image
+                    subprocess.run(['docker', 'rmi', image_name], capture_output=True)
+                    
+                else:
+                    # No Docker files, create a temporary one based on detected language
+                    return jsonify({'error': 'No Dockerfile or docker-compose.yml found'}), 400
+                
+                # Parse results
+                output = result.stdout + result.stderr
+                passed = result.returncode == 0
+                
+                # Try to extract test counts
+                passed_count = 0
+                failed_count = 0
+                
+                # Common patterns
+                import re
+                if 'passed' in output.lower():
+                    match = re.search(r'(\d+)\s*passed', output, re.IGNORECASE)
+                    if match:
+                        passed_count = int(match.group(1))
+                
+                if 'failed' in output.lower():
+                    match = re.search(r'(\d+)\s*failed', output, re.IGNORECASE)
+                    if match:
+                        failed_count = int(match.group(1))
+                
+                return jsonify({
+                    'success': True,
+                    'docker': True,
+                    'results': {
+                        'framework': 'docker',
+                        'passed': passed_count if passed_count else (1 if passed else 0),
+                        'failed': failed_count if failed_count else (0 if passed else 1),
+                        'errors': 0,
+                        'skipped': 0,
+                        'output': output[:5000],
+                        'success': passed
+                    }
+                })
+                
+            except subprocess.TimeoutExpired:
+                return jsonify({'error': 'Docker test execution timed out'}), 500
+            except Exception as e:
+                print(f"Docker test error: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': f'Docker test failed: {str(e)}'}), 500
+        
+        # Original test running logic for non-Docker mode
         results = {}
         
         # Run tests based on framework or auto-detect
@@ -1388,6 +1526,29 @@ def run_tests():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/check-docker', methods=['GET'])
+def check_docker():
+    """Check if Docker is available for test running"""
+    try:
+        # Simple Docker check
+        result = subprocess.run(['docker', '--version'], capture_output=True, text=True)
+        docker_available = result.returncode == 0
+        return jsonify({
+            'can_use_docker': docker_available,
+            'docker_version': result.stdout.strip() if docker_available else None
+        })
+    except Exception as e:
+        return jsonify({'can_use_docker': False, 'error': str(e)})
+    
+    docker_available = check_docker_available()
+    dockerfile_exists = os.path.exists(os.path.join(os.path.dirname(__file__), '..', 'Dockerfile'))
+    
+    return jsonify({
+        'docker_available': docker_available,
+        'dockerfile_exists': dockerfile_exists,
+        'can_use_docker': docker_available and dockerfile_exists
+    })
 
 @app.route('/api/refine-prompt', methods=['POST'])
 def refine_prompt():
@@ -1892,6 +2053,59 @@ def check_session_repo():
                 result['repos_found'].append(repo_path)
     
     return jsonify(result)
+
+@app.route('/api/detect-docker', methods=['POST'])
+def detect_docker():
+    """Detect if a repository has Docker setup"""
+    try:
+        data = request.get_json()
+        repo_path = data.get('repo_path')
+        session_id = data.get('session_id')
+        
+        # Handle repo path resolution similar to other endpoints
+        if repo_path and repo_path.startswith('https://github.com'):
+            if not session_id:
+                return jsonify({'error': 'Session ID required for GitHub repos'}), 400
+            
+            # Find the cloned repo
+            folders_to_check = [
+                os.path.join(app.config['UPLOAD_FOLDER'], f'session_{session_id}'),
+                os.path.join(app.config['UPLOAD_FOLDER'], f'job_{session_id}')
+            ]
+            
+            for job_id, job_data in jobs.items():
+                if job_data.get('session_id') == session_id:
+                    folders_to_check.append(os.path.join(app.config['UPLOAD_FOLDER'], f'job_{job_id}'))
+            
+            for folder in folders_to_check:
+                potential_repo = os.path.join(folder, 'repo')
+                if os.path.exists(potential_repo):
+                    repo_path = potential_repo
+                    break
+            else:
+                return jsonify({'error': 'Repository not found'}), 404
+        
+        # Check for Docker files
+        dockerfile_exists = os.path.exists(os.path.join(repo_path, 'Dockerfile'))
+        compose_exists = os.path.exists(os.path.join(repo_path, 'docker-compose.yml')) or \
+                        os.path.exists(os.path.join(repo_path, 'docker-compose.yaml'))
+        
+        # Check if Docker is available on the system
+        docker_available = False
+        try:
+            result = subprocess.run(['docker', '--version'], capture_output=True)
+            docker_available = result.returncode == 0
+        except:
+            pass
+        
+        return jsonify({
+            'docker_available': docker_available,
+            'has_dockerfile': dockerfile_exists,
+            'has_compose': compose_exists,
+            'can_use_docker': docker_available and (dockerfile_exists or compose_exists)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/check-llm-status')
 def check_llm_status():

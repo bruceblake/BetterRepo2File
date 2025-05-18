@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./temp:/app/temp
+    environment:
+      - FLASK_APP=app/app.py
+      - FLASK_ENV=development
+    restart: unless-stopped
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test-runner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./test_results:/test_results
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    command: ["echo", "Test runner image built and ready"]
+    profiles:
+      - test

@@ -294,11 +294,50 @@
                 </button>
             </div>
 
-            <!-- Progress Overlay -->
+            <!-- Enhanced Progress Overlay -->
             <div class="progress-overlay hidden" id="progressOverlay">
                 <div class="progress-content">
-                    <div class="spinner"></div>
-                    <p id="progressMessage">Processing...</p>
+                    <div class="progress-icon">
+                        <div class="spinner"></div>
+                        <span class="material-symbols-outlined progress-icon-symbol" id="progressIcon">hourglass_top</span>
+                    </div>
+                    <h3 id="progressTitle">Processing...</h3>
+                    <p id="progressMessage" class="progress-description">Initializing workflow...</p>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                    <div class="progress-steps" id="progressSteps">
+                        <div class="progress-step" data-step="1">
+                            <span class="step-icon material-symbols-outlined">cloud_download</span>
+                            <span class="step-label">Fetching Repository</span>
+                        </div>
+                        <div class="progress-step" data-step="2">
+                            <span class="step-icon material-symbols-outlined">analytics</span>
+                            <span class="step-label">Analyzing Code</span>
+                        </div>
+                        <div class="progress-step" data-step="3">
+                            <span class="step-icon material-symbols-outlined">psychology</span>
+                            <span class="step-label">AI Processing</span>
+                        </div>
+                        <div class="progress-step" data-step="4">
+                            <span class="step-icon material-symbols-outlined">description</span>
+                            <span class="step-label">Generating Output</span>
+                        </div>
+                    </div>
+                    <div class="progress-details" id="progressDetails">
+                        <div class="detail-item hidden" id="repoDetail">
+                            <span class="detail-icon material-symbols-outlined">folder</span>
+                            <span class="detail-text"></span>
+                        </div>
+                        <div class="detail-item hidden" id="filesDetail">
+                            <span class="detail-icon material-symbols-outlined">inventory_2</span>
+                            <span class="detail-text"></span>
+                        </div>
+                        <div class="detail-item hidden" id="sizeDetail">
+                            <span class="detail-icon material-symbols-outlined">data_usage</span>
+                            <span class="detail-text"></span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>
