@@ -551,6 +551,9 @@ class WorkflowController {
             return;
         }
         
+        // Set the current step so displayResults knows what to do
+        this.state.currentStep = 7;
+        
         // Don't store large output in state
         this.showProgress('Generating implementation context for Claude...');
         
@@ -562,10 +565,11 @@ class WorkflowController {
                     repo_url: this.state.repoUrl,
                     repo_branch: this.state.branch,
                     vibe: this.state.vibe,
-                    stage: 'D',  // New stage for iteration coding
+                    stage: 'D',  // Stage D for iteration coding
                     planner_output: iterationPlannerInput,
                     feedback_log: this.state.feedbackText,
-                    original_planner_output: this.state.plannerOutput
+                    original_planner_output: this.state.plannerOutput,
+                    session_id: this.state.sessionId
                 })
             });
             
