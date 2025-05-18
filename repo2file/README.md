@@ -11,6 +11,11 @@ This tool is designed to dump the contents of a Git repository into a single fil
 - Generates a tree-like directory structure for easy navigation
 - Includes file contents for all non-excluded files
 - Customizable file type filtering
+- **NEW**: Gemini 1.5 Pro support with 1M token budget
+- Advanced semantic analysis and code understanding
+- Hierarchical manifest generation for large contexts
+- Multiple truncation strategies including middle summarization
+- Business logic prioritization
 
 ## Use Cases
 
@@ -24,6 +29,7 @@ This tool is designed to dump the contents of a Git repository into a single fil
 
 ## Usage
 
+### Basic Usage
 ```
 python dump.py <start_path> <output_file> [exclusion_file] [file_extensions...]
 ```
@@ -36,6 +42,24 @@ python dump.py <start_path> <output_file> [exclusion_file] [file_extensions...]
 Example:
 ```
 python dump.py /path/to/your/repo output.txt .gitignore py js tsx
+```
+
+### Advanced Usage with Ultra Mode
+```
+python dump_ultra.py <start_path> <output_file> [options]
+```
+
+Options:
+- `--profile gemini`: Use the Gemini 1.5 Pro optimized profile
+- `--ultra`: Enable ultra mode for advanced processing
+- `--model gemini-1.5-pro`: Specify the model
+- `--token-budget 1000000`: Set token budget (default for Gemini: 1M)
+- `--truncation-strategy middle_summarize`: Use smart middle truncation
+- `--include-manifest`: Generate hierarchical navigation manifest
+
+Example with Gemini profile:
+```
+python dump_ultra.py /path/to/your/repo output.txt --profile gemini
 ```
 
 ## Output Format

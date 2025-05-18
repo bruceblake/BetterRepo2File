@@ -15,13 +15,24 @@ from dataclasses import dataclass, field
 import fnmatch
 import mimetypes
 import pathspec
-import tiktoken
+try:
+    import tiktoken
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    TIKTOKEN_AVAILABLE = False
+    print("Warning: tiktoken not available. Using character-based token estimation.", file=sys.stderr)
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 
 # Import our custom modules
-from token_manager import TokenManager, TokenBudget
-from code_analyzer import CodeAnalyzer
+from .token_manager import TokenManager, TokenBudget
+from .code_analyzer import CodeAnalyzer
+from .git_analyzer import GitAnalyzer
+from .llm_augmenter import LLMAugmenter
+from .action_blocks import (
+    ActionBlockGenerator, CallGraphNode, GitInsight, 
+    TodoItem, PCANote, CodeQualityMetric
+)
 
 # Configuration constants
 DEFAULT_TOKEN_BUDGET = 500000
@@ -92,9 +103,11 @@ SUMMARIZE_FILES = {
 class ManifestGenerator:
     """Generate hierarchical manifest for large contexts"""
     
-    def __init__(self, token_manager: TokenManager, code_analyzer: CodeAnalyzer):
+    def __init__(self, token_manager: TokenManager, code_analyzer: CodeAnalyzer, 
+                 action_block_generator = None):
         self.token_manager = token_manager
         self.code_analyzer = code_analyzer
+        self.action_block_generator = action_block_generator
     
     def generate_manifest(self, files: List['FileInfo'], codebase_analysis: Dict, 
                          max_tokens: int = 5000) -> Tuple[str, Dict[str, int]]:
@@ -145,7 +158,7 @@ class ManifestGenerator:
             
             manifest_lines.append("")
             
-            # Sort files by importance
+            # Sort files by importance (including query relevance if available)
             dir_files.sort(key=lambda f: -f.importance_score)
             
             # Add key files
@@ -154,20 +167,41 @@ class ManifestGenerator:
                 
                 # Get file summary
                 summary = self._get_file_summary(file)
+                
+                # Add query relevance indicator if DQCG is active
+                query_indicator = ""
+                if hasattr(file, 'query_relevance_score') and file.query_relevance_score > 0.3:
+                    query_indicator = " 🎯"  # Target emoji to indicate query relevance
+                
                 if summary:
-                    manifest_lines.append(f"- **{rel_path}** - {summary}")
+                    manifest_lines.append(f"- **{rel_path}** - {summary}{query_indicator}")
                 else:
-                    manifest_lines.append(f"- **{rel_path}**")
+                    manifest_lines.append(f"- **{rel_path}**{query_indicator}")
                 
                 # Add key exports/classes if available
-                if file.semantic_data and 'ast_info' in file.semantic_data:
-                    entities = []
-                    for entity in file.semantic_data['ast_info'].get('entities', [])[:5]:
-                        if entity['type'] in ['class', 'function', 'export']:
-                            entities.append(f"`{entity['name']}`")
+                if file.semantic_data and 'entities' in file.semantic_data:
+                    key_entities = []
+                    for entity in file.semantic_data['entities'][:5]:
+                        if entity.type in ['class', 'function', 'method']:
+                            key_entities.append(f"`{entity.name}`")
                     
-                    if entities:
-                        manifest_lines.append(f"  - Key items: {', '.join(entities)}")
+                    if key_entities:
+                        manifest_lines.append(f"  - Key items: {', '.join(key_entities)}")
+                    
+                    # Add call graph information for important entities
+                    for entity in file.semantic_data['entities'][:3]:  # Show top 3
+                        if entity.type in ['function', 'method'] and (entity.calls or entity.called_by):
+                            manifest_lines.append(f"  - `{entity.name}`:")
+                            if entity.calls:
+                                # Only show calls that are also in our output context
+                                relevant_calls = [call for call in entity.calls[:5]]  # Limit to 5
+                                if relevant_calls:
+                                    manifest_lines.append(f"    - Calls: {', '.join(relevant_calls)}")
+                            if entity.called_by:
+                                # Only show callers that are also in our output context
+                                relevant_callers = [caller for caller in entity.called_by[:5]]  # Limit to 5
+                                if relevant_callers:
+                                    manifest_lines.append(f"    - Called by: {', '.join(relevant_callers)}")
                 
                 manifest_lines.append("")
             
@@ -183,6 +217,19 @@ class ManifestGenerator:
             f"- **Tokens Used**: {self.token_manager.budget.used:,}",
             f"- **Utilization**: {self.token_manager.budget.used/self.token_manager.budget.total*100:.1f}%",
             "",
+        ])
+        
+        # Add query information if available
+        if hasattr(self, 'processing_query') and self.processing_query:
+            manifest_lines.extend([
+                "### Query-Aware Context Generation",
+                "",
+                f"Files were prioritized for the query: \"{self.processing_query}\"",
+                "🎯 indicates files with high query relevance",
+                "",
+            ])
+        
+        manifest_lines.extend([
             "### File Selection Strategy",
             "",
             "Files were prioritized based on:",
@@ -190,8 +237,26 @@ class ManifestGenerator:
             "2. Code complexity and entity count",
             "3. File type and extension",
             "4. Size optimization for token budget",
-            ""
         ])
+        
+        # Add query prioritization if active
+        if hasattr(self, 'processing_query') and self.processing_query:
+            manifest_lines.append("5. Query relevance (DQCG active)")
+        
+        manifest_lines.append("")
+        
+        # Add AI Action Blocks section if configured
+        if (self.action_block_generator and 
+            self.action_block_generator.format in ['manifest', 'both']):
+            action_blocks_section = self.action_block_generator.generate_manifest_section()
+            if action_blocks_section:
+                manifest_lines.extend([
+                    "---",
+                    "",
+                    "## AI Action Blocks Summary",
+                    "",
+                    action_blocks_section
+                ])
         
         manifest_text = '\n'.join(manifest_lines)
         return manifest_text, offset_map
@@ -330,6 +395,7 @@ class FileInfo:
     content_hash: Optional[str] = None
     token_count: Optional[int] = None
     semantic_data: Optional[Dict] = None
+    query_relevance_score: float = 0.0
 
 @dataclass
 class ProcessingProfile:
@@ -344,6 +410,28 @@ class ProcessingProfile:
     min_importance_score: float = 0.0
     generate_manifest: bool = True  # Generate hierarchical manifest for large contexts
     truncation_strategy: str = 'semantic'  # semantic, basic, middle_summarize, business_logic
+    intended_query: str = ''  # Optional intended LLM query for context-aware prioritization
+    vibe_statement: str = ''  # User's high-level goal/vibe for Gemini Planner Primer  
+    planner_output: str = ''  # AI planner's output to integrate into Claude Coder context
+    enable_git_insights: bool = False  # Include git history insights in output
+    enable_llm_summarization: bool = False  # Use LLM to summarize long/complex files
+    enable_llm_proactive_augmentation: bool = False  # Use LLM for proactive code analysis
+    llm_augmentation_model: str = 'gemini-1.5-flash'  # LLM model for augmentation
+    llm_augmentation_api_key_env_var: str = 'GEMINI_API_KEY'  # Environment variable for API key
+    max_tokens_per_summary: int = 150  # Max tokens for each summary
+    max_tokens_per_augmentation_chunk: int = 400  # Max tokens for PCA per chunk
+    # AI Action Block options
+    enable_action_blocks: bool = True
+    action_block_format: str = 'both'  # 'inline', 'manifest', or 'both'
+    action_block_types: List[str] = field(default_factory=lambda: [
+        'CALL_GRAPH_NODE', 'GIT_INSIGHT', 'TODO_ITEM', 
+        'PCA_NOTE', 'CODE_QUALITY_METRIC'
+    ])
+    action_block_filters: Dict[str, Any] = field(default_factory=lambda: {
+        'min_complexity': 10,
+        'min_priority': 'medium',
+        'include_private_methods': False
+    })
     
     def save(self, path: Path):
         with open(path, 'w') as f:
@@ -515,6 +603,15 @@ class UltraFileScanner:
                     info.importance_score = self.code_analyzer.calculate_file_importance(
                         info.semantic_data, file_path
                     )
+                    # Add query relevance if query is provided
+                    if hasattr(self.profile, 'intended_query') and self.profile.intended_query:
+                        query_relevance = self.code_analyzer.calculate_query_relevance(
+                            self.profile.intended_query, file_path, content, info.semantic_data
+                        )
+                        # Combine importance score with query relevance
+                        # Query relevance can boost score by up to 50%
+                        info.query_relevance_score = query_relevance
+                        info.importance_score = min(1.0, info.importance_score + query_relevance * 0.5)
             
             # Cache the result with profile awareness
             self.cache.set_file_info(file_path, self._fileinfo_to_dict(info), self.profile_hash)
@@ -596,8 +693,37 @@ class UltraFileScanner:
         }
         return file_path.suffix.lower() in code_extensions
     
+    def _serialize_semantic_data(self, semantic_data: Dict) -> Dict:
+        """Convert semantic data to JSON-serializable format"""
+        if not semantic_data:
+            return None
+        
+        serialized = {}
+        for key, value in semantic_data.items():
+            if key == 'entities' and isinstance(value, list):
+                # Convert CodeEntity objects to dictionaries
+                serialized[key] = []
+                for entity in value:
+                    if hasattr(entity, '__dict__'):
+                        entity_dict = entity.__dict__.copy()
+                        # Convert set to list for JSON serialization
+                        if 'dependencies' in entity_dict and isinstance(entity_dict['dependencies'], set):
+                            entity_dict['dependencies'] = list(entity_dict['dependencies'])
+                        serialized[key].append(entity_dict)
+                    else:
+                        serialized[key].append(entity)
+            else:
+                serialized[key] = value
+        
+        return serialized
+    
     def _fileinfo_to_dict(self, info: FileInfo) -> Dict:
         """Convert FileInfo to dictionary for caching"""
+        # Convert semantic_data to JSON-serializable format
+        semantic_data = None
+        if info.semantic_data:
+            semantic_data = self._serialize_semantic_data(info.semantic_data)
+        
         return {
             'rel_path': info.rel_path,
             'size': info.size,
@@ -609,7 +735,7 @@ class UltraFileScanner:
             'importance_score': info.importance_score,
             'content_hash': info.content_hash,
             'token_count': info.token_count,
-            'semantic_data': info.semantic_data,
+            'semantic_data': semantic_data,
         }
     
     def _dict_to_fileinfo(self, data: Dict, file_path: Path, base_path: Path) -> FileInfo:
@@ -631,10 +757,15 @@ class UltraFileScanner:
 
 class ContentProcessor:
     """Advanced content processing with semantic understanding"""
-    def __init__(self, token_manager: TokenManager, code_analyzer: CodeAnalyzer, profile: ProcessingProfile = None):
+    def __init__(self, token_manager: TokenManager, code_analyzer: CodeAnalyzer, 
+                 profile: ProcessingProfile = None, git_analyzer = None, llm_augmenter = None,
+                 action_block_generator = None):
         self.token_manager = token_manager
         self.code_analyzer = code_analyzer
         self.profile = profile
+        self.git_analyzer = git_analyzer
+        self.llm_augmenter = llm_augmenter
+        self.action_block_generator = action_block_generator
     
     def process_file(self, file_info: FileInfo, token_budget: int) -> Tuple[str, int]:
         """Process file content with intelligent truncation"""
@@ -649,24 +780,311 @@ class ContentProcessor:
             if file_info.token_count is None:
                 file_info.token_count = self.token_manager.count_tokens(content)
             
+            # Extract TODOs and generate action blocks
+            if self.action_block_generator:
+                todos = self._extract_todos(content, str(file_info.rel_path))
+                for todo in todos:
+                    self.action_block_generator.add_block(todo)
+                
+                # Generate Call Graph action blocks from semantic data
+                if file_info.semantic_data and 'entities' in file_info.semantic_data:
+                    for entity in file_info.semantic_data['entities']:
+                        if hasattr(entity, 'calls') and hasattr(entity, 'called_by'):
+                            call_node = CallGraphNode(
+                                file=str(file_info.rel_path),
+                                entity=entity.qualified_name,
+                                entity_type=entity.type,
+                                calls=entity.calls or [],
+                                called_by=entity.called_by or []
+                            )
+                            self.action_block_generator.add_block(call_node)
+            
+            # Add git insights if enabled
+            output_content = []
+            git_header = ""
+            
+            if self.profile and self.profile.enable_git_insights and self.git_analyzer:
+                git_info = self.git_analyzer.get_last_modified_info(str(file_info.rel_path))
+                if git_info and any(git_info.values()):
+                    change_freq = self.git_analyzer.get_change_frequency(str(file_info.rel_path))
+                    contributors = self.git_analyzer.get_recent_contributors(str(file_info.rel_path))
+                    
+                    git_header = f"""# Git Insights for {file_info.rel_path}
+# Last Modified: {git_info.get('date', 'Unknown')} by {git_info.get('author', 'Unknown')}
+# Commit: {git_info.get('commit_message', 'Unknown')} ({git_info.get('commit_hash', 'Unknown')})
+# Change Frequency (90d): {change_freq} commits
+# Recent Contributors: {', '.join(contributors) if contributors else 'Unknown'}
+# {'=' * 50}
+"""
+                    output_content.append(git_header)
+                    
+                    # Generate Git insight action block
+                    if self.action_block_generator:
+                        git_block = GitInsight(
+                            file=str(file_info.rel_path),
+                            last_mod_date=git_info.get('date', 'Unknown'),
+                            last_mod_author=git_info.get('author', 'Unknown'),
+                            last_commit=git_info.get('commit_message', 'Unknown'),
+                            commit_hash=git_info.get('commit_hash', 'Unknown')[:7],  # Short hash
+                            change_frequency_90d=change_freq,
+                            recent_contributors=contributors if contributors else []
+                        )
+                        self.action_block_generator.add_block(git_block)
+            
             # If content fits within budget, return as is
-            if file_info.token_count <= token_budget:
-                return content, file_info.token_count
+            adjusted_budget = token_budget - self.token_manager.count_tokens(git_header)
+            if file_info.token_count <= adjusted_budget:
+                output_content.append(content)
+                return '\n'.join(output_content), file_info.token_count + len(git_header.split())
+            
+            # Check if LLM summarization is enabled for long/complex files
+            if (self.profile and self.profile.enable_llm_summarization and 
+                self.llm_augmenter and self.llm_augmenter.is_available()):
+                
+                # Criteria for LLM summarization
+                should_summarize = (
+                    file_info.token_count > token_budget * 2 or  # File is much larger than budget
+                    (file_info.semantic_data and 
+                     file_info.semantic_data.get('metrics', {}).get('complexity_score', 0) > 0.3)
+                )
+                
+                if should_summarize:
+                    summary = self.llm_augmenter.summarize_code_chunk(
+                        content,
+                        task_context=f"Summarize this {file_info.language or 'code'} file for understanding its purpose and structure",
+                        max_summary_tokens=self.profile.max_tokens_per_summary
+                    )
+                    
+                    if summary:
+                        summary_header = f"\n[LLM-Generated Summary]\n{summary}\n{'=' * 50}\n"
+                        output_content.append(summary_header)
+                        adjusted_budget -= self.token_manager.count_tokens(summary_header)
             
             # Smart truncation based on configured strategy
             strategy = self.profile.truncation_strategy if self.profile else 'semantic'
             
-            if strategy == 'business_logic' and file_info.semantic_data:
-                return self._business_logic_truncate(content, file_info, token_budget)
-            elif strategy == 'middle_summarize':
-                return self._middle_summarize_truncate(content, file_info, token_budget)
-            elif strategy == 'semantic' and file_info.semantic_data:
-                return self._semantic_truncate(content, file_info, token_budget)
-            else:
-                return self._basic_truncate(content, token_budget)
+            # Apply truncation with remaining budget
+            truncated_content, tokens = self._apply_truncation_strategy(
+                content, file_info, adjusted_budget, strategy
+            )
+            output_content.append(truncated_content)
             
+            # Add LLM augmentation notes if enabled
+            if (self.profile and self.profile.enable_llm_proactive_augmentation and
+                self.llm_augmenter and self.llm_augmenter.is_available()):
+                
+                augmentation_notes = self._generate_augmentation_notes(
+                    truncated_content, file_info
+                )
+                if augmentation_notes:
+                    output_content.append(augmentation_notes)
+            
+            # Add function/method anchors for easier navigation  
+            if file_info.semantic_data and 'entities' in file_info.semantic_data:
+                # Find where the actual content is in output_content
+                for i, part in enumerate(output_content):
+                    if part == truncated_content:
+                        enriched_content = self._add_entity_anchors(truncated_content, file_info.semantic_data['entities'])
+                        output_content[i] = enriched_content  # Replace the content with anchored version
+                        break
+            
+            return '\n'.join(output_content), sum(self.token_manager.count_tokens(part) for part in output_content)
         except Exception as e:
             return f"[Error reading file: {e}]", 50
+    
+    def _add_entity_anchors(self, content: str, entities: List) -> str:
+        """Add textual anchors for functions/methods/classes"""
+        lines = content.splitlines()
+        anchored_lines = []
+        line_index = 0
+        
+        # Sort entities by line number
+        sorted_entities = sorted(entities, key=lambda e: e.line_start if hasattr(e, 'line_start') else 0)
+        
+        for entity in sorted_entities:
+            if not hasattr(entity, 'line_start'):
+                continue
+                
+            # Add lines before the entity
+            while line_index < entity.line_start - 1 and line_index < len(lines):
+                anchored_lines.append(lines[line_index])
+                line_index += 1
+            
+            # Add anchor for the entity
+            if hasattr(entity, 'qualified_name') and entity.qualified_name:
+                anchor_type = "FUNCTION" if entity.type == 'function' else "METHOD" if entity.type == 'method' else "CLASS"
+                anchored_lines.append(f"[[{anchor_type}_START: {entity.qualified_name}]]")
+            
+            # Add the entity lines
+            while line_index < entity.line_end and line_index < len(lines):
+                anchored_lines.append(lines[line_index])
+                line_index += 1
+                
+            # Add end anchor
+            if hasattr(entity, 'qualified_name') and entity.qualified_name:
+                anchored_lines.append(f"[[{anchor_type}_END: {entity.qualified_name}]]")
+        
+        # Add remaining lines
+        while line_index < len(lines):
+            anchored_lines.append(lines[line_index])
+            line_index += 1
+        
+        return '\n'.join(anchored_lines)
+    
+    def _extract_todos(self, content: str, file_path: str) -> List[TodoItem]:
+        """Extract TODO, FIXME, HACK, and NOTE comments from content"""
+        todos = []
+        lines = content.splitlines()
+        
+        # Pattern to match TODO-like comments
+        pattern = r'(?:#|//|/\*|\*)\s*(TODO|FIXME|HACK|NOTE)[:\s]+(.*?)(?:\*/)?$'
+        
+        for i, line in enumerate(lines):
+            match = re.search(pattern, line.strip(), re.IGNORECASE)
+            if match:
+                todo_type = match.group(1).upper()
+                text = match.group(2).strip()
+                
+                # Determine priority based on type and content
+                priority = 'medium'
+                if todo_type in ['FIXME', 'HACK']:
+                    priority = 'high'
+                elif any(word in text.lower() for word in ['critical', 'urgent', 'security', 'vulnerability']):
+                    priority = 'high'
+                elif any(word in text.lower() for word in ['minor', 'cleanup', 'refactor']):
+                    priority = 'low'
+                
+                todos.append(TodoItem(
+                    file=file_path,
+                    line=i + 1,
+                    todo_type=todo_type,
+                    text=text,
+                    priority=priority
+                ))
+        
+        return todos
+    
+    def _apply_truncation_strategy(self, content: str, file_info: FileInfo, 
+                                  token_budget: int, strategy: str) -> Tuple[str, int]:
+        """Apply the specified truncation strategy"""
+        if strategy == 'business_logic' and file_info.semantic_data:
+            return self._business_logic_truncate(content, file_info, token_budget)
+        elif strategy == 'middle_summarize':
+            return self._middle_summarize_truncate(content, file_info, token_budget)
+        elif strategy == 'semantic' and file_info.semantic_data:
+            return self._semantic_truncate(content, file_info, token_budget)
+        else:
+            return self._basic_truncate(content, token_budget)
+    
+    def _generate_augmentation_notes(self, content: str, file_info: FileInfo) -> str:
+        """Generate AI augmentation notes for critical code sections"""
+        if not self.llm_augmenter or not self.llm_augmenter.is_available():
+            return ""
+        
+        notes = []
+        
+        # Identify critical sections for augmentation
+        critical_sections = self._identify_critical_sections(content, file_info)
+        
+        for section in critical_sections[:3]:  # Limit to top 3 sections
+            # Get section content
+            lines = content.splitlines()
+            section_content = '\n'.join(lines[section['start']:section['end']])
+            
+            # Generate different types of augmentation
+            if section['reason'] == 'high_complexity':
+                ambiguities = self.llm_augmenter.identify_potential_ambiguities(
+                    section_content,
+                    task_context=f"Analyzing complex {file_info.language or 'code'} code section"
+                )
+                if ambiguities:
+                    notes.append(f"\n--- AI Augmentation Notes ---")
+                    notes.append(f"Section: lines {section['start']+1}-{section['end']+1}")
+                    notes.append("Potential Ambiguities:")
+                    for amb in ambiguities:
+                        notes.append(f"  - {amb}")
+            
+            elif section['reason'] == 'query_relevant':
+                assumptions = self.llm_augmenter.infer_implicit_assumptions(
+                    section_content,
+                    task_context=f"Analyzing query-relevant code for: {self.profile.intended_query}"
+                )
+                if assumptions:
+                    notes.append(f"\n--- AI Augmentation Notes ---")
+                    notes.append(f"Section: lines {section['start']+1}-{section['end']+1}")
+                    notes.append("Implicit Assumptions:")
+                    for assum in assumptions:
+                        notes.append(f"  - {assum}")
+            
+            elif section['reason'] == 'high_change_frequency':
+                questions = self.llm_augmenter.suggest_clarifying_questions(
+                    section_content,
+                    task_context="For modifying frequently changed code"
+                )
+                if questions:
+                    notes.append(f"\n--- AI Augmentation Notes ---")
+                    notes.append(f"Section: lines {section['start']+1}-{section['end']+1}")
+                    notes.append("Clarifying Questions for Modification:")
+                    for question in questions:
+                        notes.append(f"  - {question}")
+        
+        if notes:
+            notes.append("--- End AI Augmentation ---\n")
+            return '\n'.join(notes)
+        
+        return ""
+    
+    def _identify_critical_sections(self, content: str, file_info: FileInfo) -> List[Dict]:
+        """Identify critical code sections for AI augmentation"""
+        sections = []
+        lines = content.splitlines()
+        
+        # Use semantic data if available
+        if file_info.semantic_data and 'entities' in file_info.semantic_data:
+            for entity in file_info.semantic_data['entities']:
+                # High complexity entities
+                if hasattr(entity, 'complexity_score') and entity.complexity_score > 10:
+                    sections.append({
+                        'start': entity.line_start - 1,
+                        'end': entity.line_end,
+                        'reason': 'high_complexity',
+                        'score': entity.complexity_score
+                    })
+                
+                # Query-relevant entities (if query is provided)
+                if self.profile.intended_query and hasattr(entity, 'query_relevance_score'):
+                    if entity.query_relevance_score > 0.5:
+                        sections.append({
+                            'start': entity.line_start - 1,
+                            'end': entity.line_end,
+                            'reason': 'query_relevant',
+                            'score': entity.query_relevance_score
+                        })
+                
+                # Entities with many call relationships
+                if hasattr(entity, 'calls') and hasattr(entity, 'called_by'):
+                    total_connections = len(entity.calls) + len(entity.called_by)
+                    if total_connections > 5:
+                        sections.append({
+                            'start': entity.line_start - 1,
+                            'end': entity.line_end,
+                            'reason': 'high_connectivity',
+                            'score': total_connections
+                        })
+        
+        # If git data available, check for frequently changed sections
+        if self.git_analyzer and hasattr(file_info, 'change_frequency') and file_info.change_frequency > 10:
+            # For simplicity, flag the whole file as frequently changed
+            sections.append({
+                'start': 0,
+                'end': min(50, len(lines)),  # First 50 lines
+                'reason': 'high_change_frequency',
+                'score': file_info.change_frequency
+            })
+        
+        # Sort by score and return top sections
+        sections.sort(key=lambda s: s['score'], reverse=True)
+        return sections
     
     def _semantic_truncate(self, content: str, file_info: FileInfo, token_budget: int) -> Tuple[str, int]:
         """Truncate content using semantic understanding"""
@@ -979,7 +1397,7 @@ class CodebaseAnalyzer:
             'languages': {},
             'file_types': {},
             'primary_language': None,
-            'frameworks': set(),
+            'frameworks': [],
             'project_type': None,
             'dependency_graph': {},
             'key_files': [],
@@ -1022,7 +1440,9 @@ class CodebaseAnalyzer:
         for file in files:
             for marker, frameworks in framework_files.items():
                 if file.path.name == marker:
-                    analysis['frameworks'].update(frameworks)
+                    for framework in frameworks:
+                        if framework not in analysis['frameworks']:
+                            analysis['frameworks'].append(framework)
         
         # Determine project type
         analysis['project_type'] = self._determine_project_type(analysis)
@@ -1069,10 +1489,38 @@ class UltraRepo2File:
         self.cache = Cache(profile_key=profile_key)
         self.token_manager = TokenManager(model=profile.model, budget=profile.token_budget)
         self.code_analyzer = CodeAnalyzer()
+        self.git_analyzer = None  # Will be initialized when processing a git repo
+        self.llm_augmenter = None  # Will be initialized if configured
+        
+        # Initialize LLM augmenter if enabled
+        if profile.enable_llm_summarization or profile.enable_llm_proactive_augmentation:
+            try:
+                # Extract provider name from model (e.g., "gemini-1.5-flash" -> "gemini")
+                provider = profile.llm_augmentation_model.split('-')[0].lower()
+                self.llm_augmenter = LLMAugmenter(
+                    provider=provider,
+                    api_key_env_var=profile.llm_augmentation_api_key_env_var
+                )
+                if self.llm_augmenter.is_available():
+                    print(f"LLM augmentation enabled with {provider}")
+                else:
+                    print(f"LLM augmentation configured but provider {provider} is not available")
+            except Exception as e:
+                print(f"Failed to initialize LLM augmenter: {e}")
+        
+        # Initialize action block generator
+        self.action_block_generator = ActionBlockGenerator({
+            'enable_action_blocks': profile.enable_action_blocks,
+            'action_block_format': profile.action_block_format,
+            'action_block_types': profile.action_block_types,
+            'action_block_filters': profile.action_block_filters
+        })
+        
         self.scanner = UltraFileScanner(self.cache, self.token_manager, self.code_analyzer, self.profile)
-        self.processor = ContentProcessor(self.token_manager, self.code_analyzer, self.profile)
+        self.processor = ContentProcessor(self.token_manager, self.code_analyzer, self.profile, 
+                                         self.git_analyzer, self.llm_augmenter, self.action_block_generator)
         self.codebase_analyzer = CodebaseAnalyzer(self.code_analyzer)
-        self.manifest_generator = ManifestGenerator(self.token_manager, self.code_analyzer)
+        self.manifest_generator = ManifestGenerator(self.token_manager, self.code_analyzer, self.action_block_generator)
     
     def process_repository(self, repo_path: Path, output_path: Path):
         """Process repository with all optimizations"""
@@ -1083,6 +1531,16 @@ class UltraRepo2File:
         print(f"Token Budget: {self.profile.token_budget:,}")
         print(f"Repository: {repo_path}")
         print()
+        
+        # Initialize GitAnalyzer if enabled and it's a git repo
+        if self.profile.enable_git_insights:
+            self.git_analyzer = GitAnalyzer(repo_path)
+            if self.git_analyzer.is_git_repo():
+                print("Git repository detected - insights will be included")
+                self.processor.git_analyzer = self.git_analyzer
+            else:
+                print("Not a git repository - git insights disabled")
+                self.git_analyzer = None
         
         # Load exclusion patterns
         exclusion_spec = self._load_exclusions(repo_path)
@@ -1155,12 +1613,21 @@ class UltraRepo2File:
             content, tokens_used = self.processor.process_file(file_info, remaining_budget)
             
             if tokens_used > 0:
-                file_header = f"\nFile: {file_info.rel_path}\n"
+                file_header = f"\n[[FILE_START: {file_info.rel_path}]]\n"
+                file_header += f"File: {file_info.rel_path}\n"
                 file_header += f"Language: {file_info.language or 'Unknown'}\n"
                 file_header += f"Size: {file_info.size:,} bytes | Tokens: {tokens_used:,}\n"
                 file_header += "-" * 40 + "\n"
                 
-                file_output = file_header + content + "\n"
+                # Add inline action blocks if configured
+                action_blocks_prefix = ""
+                if (self.action_block_generator and 
+                    self.action_block_generator.format in ['inline', 'both']):
+                    inline_blocks = self.action_block_generator.generate_inline_blocks(str(file_info.rel_path))
+                    if inline_blocks:
+                        action_blocks_prefix = '\n'.join(inline_blocks) + '\n\n'
+                
+                file_output = file_header + action_blocks_prefix + content + "\n"
                 file_tokens = self.token_manager.count_tokens(file_output)
                 
                 if self.token_manager.budget.remaining >= file_tokens:
@@ -1181,6 +1648,30 @@ class UltraRepo2File:
         # Write output
         final_output = '\n'.join(output_parts)
         output_path.write_text(final_output, encoding='utf-8')
+        
+        # Generate structured output if action blocks are enabled
+        if self.action_block_generator and self.action_block_generator.enabled:
+            structured_output = self.action_block_generator.generate_structured_output()
+            
+            # Convert sets to lists in codebase_analysis for JSON serialization
+            serializable_analysis = codebase_analysis.copy()
+            if 'frameworks' in serializable_analysis and isinstance(serializable_analysis['frameworks'], set):
+                serializable_analysis['frameworks'] = list(serializable_analysis['frameworks'])
+            
+            structured_output['codebase_analysis'] = serializable_analysis
+            structured_output['processing_stats'] = {
+                'files_processed': processed_count,
+                'total_files': len(files),
+                'tokens_used': self.token_manager.budget.used,
+                'token_budget': self.token_manager.budget.total,
+                'processing_time_seconds': time.time() - start_time
+            }
+            
+            # Write structured output alongside main output
+            structured_path = output_path.parent / f"{output_path.stem}_analysis.json"
+            with open(structured_path, 'w') as f:
+                json.dump(structured_output, f, indent=2)
+            print(f"Structured analysis written to: {structured_path}")
         
         # Save cache
         self.cache.save_caches()
@@ -1224,26 +1715,40 @@ class UltraRepo2File:
         return files
     
     def _generate_header(self, analysis: Dict, repo_path: Path) -> str:
-        """Generate informative header"""
-        header = ["# Repository Analysis Report", "=" * 50, ""]
-        header.append(f"Repository: {repo_path.name}")
-        header.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        header.append(f"Processing Model: {self.profile.model}")
-        header.append(f"Token Budget: {self.profile.token_budget:,}")
-        header.append("")
-        header.append("## Project Overview")
-        header.append(f"Type: {analysis['project_type']}")
-        header.append(f"Primary Language: {analysis['primary_language'] or 'Not determined'}")
-        header.append(f"Total Files: {analysis['total_files']:,}")
-        header.append(f"Total Size: {analysis['total_size']:,} bytes")
+        """Generate informative header with Vibe Coder sections"""
+        header = []
         
-        if analysis['frameworks']:
-            header.append(f"Frameworks: {', '.join(sorted(analysis['frameworks']))}")
+        # Generate Gemini Planner Primer if vibe statement is provided
+        if self.profile.vibe_statement:
+            header.extend(self._generate_gemini_planner_primer(analysis, repo_path))
+            header.extend(["", ""])  # Add some spacing
         
-        header.append("")
-        header.append("## Key Files")
-        for i, key_file in enumerate(analysis['key_files'][:10], 1):
-            header.append(f"{i}. {key_file}")
+        # Generate Claude Coder Super-Context section if planner output is provided
+        if self.profile.planner_output:
+            header.extend(self._generate_claude_coder_context_header())
+            header.extend(["", ""])  # Add some spacing
+        
+        # Standard header if no vibe coder features are enabled
+        if not self.profile.vibe_statement and not self.profile.planner_output:
+            header.extend(["# Repository Analysis Report", "=" * 50, ""])
+            header.append(f"Repository: {repo_path.name}")
+            header.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            header.append(f"Processing Model: {self.profile.model}")
+            header.append(f"Token Budget: {self.profile.token_budget:,}")
+            header.append("")
+            header.append("## Project Overview")
+            header.append(f"Type: {analysis['project_type']}")
+            header.append(f"Primary Language: {analysis['primary_language'] or 'Not determined'}")
+            header.append(f"Total Files: {analysis['total_files']:,}")
+            header.append(f"Total Size: {analysis['total_size']:,} bytes")
+            
+            if analysis['frameworks']:
+                header.append(f"Frameworks: {', '.join(sorted(analysis['frameworks']))}")
+            
+            header.append("")
+            header.append("## Key Files")
+            for i, key_file in enumerate(analysis['key_files'][:10], 1):
+                header.append(f"{i}. {key_file}")
         
         header.append("")
         header.append("## Processing Notes")
@@ -1254,6 +1759,114 @@ class UltraRepo2File:
         header.append("")
         
         return '\n'.join(header)
+    
+    def _generate_gemini_planner_primer(self, analysis: Dict, repo_path: Path) -> List[str]:
+        """Generate Section 1: Gemini Planner Primer"""
+        section = []
+        section.extend([
+            "=" * 50,
+            "SECTION 1: FOR AI PLANNING AGENT (e.g., Gemini 1.5 Pro in AI Studio)",
+            "Copy and paste this section into your Planning AI.",
+            "=" * 50,
+            "",
+            "MY VIBE / PRIMARY GOAL:",
+            self.profile.vibe_statement,
+            "",
+            "PROJECT SNAPSHOT & HIGH-LEVEL CONTEXT:",
+            f"- Primary Language: {analysis['primary_language'] or 'Not determined'}",
+            f"- Key Frameworks/Libraries: {', '.join(sorted(analysis['frameworks']))}",
+            "- Core Modules/Areas:"
+        ])
+        
+        # Add key directory structure
+        for key_dir in analysis.get('key_directories', [])[:5]:
+            section.append(f"  - {key_dir['path']}: {key_dir.get('purpose', 'Unknown purpose')}")
+        
+        # Add initial focus areas if LLM augmenter is available
+        if self.profile.vibe_statement and self.llm_augmenter and self.llm_augmenter.is_available():
+            try:
+                focus_areas = self._identify_vibe_relevant_areas(analysis, self.profile.vibe_statement)
+                if focus_areas:
+                    section.extend([
+                        "- Initial Focus Areas Suggested by Repo2File (based on your vibe statement & code structure):"
+                    ])
+                    for area in focus_areas[:3]:
+                        section.append(f"  - {area}")
+            except Exception as e:
+                print(f"Error generating focus areas: {e}")
+        
+        # Add Git insights summary if available
+        if self.git_analyzer and analysis.get('recent_activity'):
+            section.extend([
+                "",
+                "AREAS OF RECENT ACTIVITY / POTENTIAL CHURN (Git Insights):",
+                f"- Files with most changes (last 30d): {', '.join([f'{f[0]} ({f[1]} commits)' for f in analysis['recent_activity']['most_changed'][:3]])}",
+                f"- Key files recently modified: {', '.join([f'{f[0]} ({f[1]}, {f[2]})' for f in analysis['recent_activity']['recent_files'][:3]])}"
+            ])
+        
+        # Add TODO summary
+        if self.action_block_generator and self.action_block_generator.enabled:
+            todos = [b for b in self.action_block_generator.blocks if isinstance(b, TodoItem)]
+            high_priority_todos = [t for t in todos if t.priority == 'high'][:5]
+            if high_priority_todos:
+                section.extend([
+                    "",
+                    "SUMMARY OF KNOWN TODOS / ACTION ITEMS (Top 5-10):"
+                ])
+                for todo in high_priority_todos:
+                    section.append(f"- [{todo.todo_type} from {todo.file}]: {todo.text}")
+        
+        section.extend([
+            "",
+            "This initial context provides a strategic overview. More detailed code will be supplied to the coding agent based on your plan.",
+            ""
+        ])
+        
+        return section
+    
+    def _generate_claude_coder_context_header(self) -> List[str]:
+        """Generate Section 2: Claude Coder Super-Context header"""
+        section = []
+        section.extend([
+            "=" * 50,
+            "SECTION 2: FOR AI CODING AGENT (e.g., Local Claude Code)",
+            "This section contains the detailed codebase context and the plan from the AI Planning Agent.",
+            "=" * 50,
+            "",
+            "PLAN/INSTRUCTIONS FROM AI PLANNING AGENT (Gemini 1.5 Pro):",
+            self.profile.planner_output,
+            "",
+            "--- DETAILED CODEBASE CONTEXT ---",
+            ""
+        ])
+        return section
+    
+    def _identify_vibe_relevant_areas(self, analysis: Dict, vibe: str) -> List[str]:
+        """Use LLM to identify areas most relevant to the vibe statement"""
+        prompt = f"""
+        Given the following project structure and vibe statement, identify 2-3 specific files or modules 
+        that are most likely relevant to achieving the goal.
+        
+        Vibe/Goal: {vibe}
+        
+        Project Type: {analysis['project_type']}
+        Primary Language: {analysis['primary_language']}
+        Key Files: {', '.join(analysis['key_files'][:10])}
+        
+        Suggest specific files or modules with brief reasoning.
+        """
+        
+        try:
+            response = self.llm_augmenter.identify_potential_ambiguities(prompt, task_context="identifying focus areas")
+            # Parse response to extract file suggestions
+            suggestions = []
+            for line in response.split('\n'):
+                if line.strip() and ('/' in line or '.py' in line or '.js' in line):
+                    suggestions.append(line.strip())
+            return suggestions[:3]
+        except Exception as e:
+            print(f"Error identifying vibe-relevant areas: {e}")
+            return []
     
     def _generate_tree_structure(self, repo_path: Path, exclusion_spec: pathspec.PathSpec) -> str:
         """Generate directory tree structure"""
@@ -1311,105 +1924,321 @@ class UltraRepo2File:
         footer.append("Generated by UltraRepo2File")
         
         return '\n'.join(footer)
+    
+    def extract_content_from_previous_output(self, previous_output_path: Path) -> Dict:
+        """Extract content from previous repo2file output"""
+        with open(previous_output_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Extract vibes/goals
+        vibe_pattern = r"My Vibe / Primary Goal:.+?(?=\n\n)"
+        vibe_match = re.search(vibe_pattern, content, re.DOTALL)
+        vibe_statement = vibe_match.group(0).replace("My Vibe / Primary Goal:", "").strip() if vibe_match else ""
+        
+        # Extract planner output
+        planner_start = content.find("SECTION 1: FOR AI PLANNING AGENT")
+        planner_end = content.find("SECTION 2: FOR AI CODER") if "SECTION 2: FOR AI CODER" in content else len(content)
+        planner_output = content[planner_start:planner_end].strip() if planner_start != -1 else ""
+        
+        # Extract key files and their content
+        file_blocks = {}
+        file_pattern = r"\[\[FILE_START:(.*?)\]\](.+?)\[\[FILE_END\]\]"
+        for match in re.finditer(file_pattern, content, re.DOTALL):
+            file_path = match.group(1).strip()
+            file_content = match.group(2).strip()
+            file_blocks[file_path] = file_content
+        
+        return {
+            "vibe_statement": vibe_statement,
+            "planner_output": planner_output,
+            "file_blocks": file_blocks,
+            "raw_content": content
+        }
+    
+    def generate_iteration_brief(self, repo_path: Path, previous_output: Dict, user_feedback: str = "") -> str:
+        """Generate iteration brief for Gemini planner"""
+        brief = []
+        brief.append("# Iteration Brief for AI Planning Agent")
+        brief.append("")
+        
+        # Previous vibe/goals
+        if previous_output["vibe_statement"]:
+            brief.append("## Previous Vibe/Goal")
+            brief.append(previous_output["vibe_statement"])
+            brief.append("")
+        
+        # Git diff summary
+        if self.git_analyzer and self.git_analyzer.is_git_repo():
+            diff_summary = self.git_analyzer.get_diff_summary()
+            brief.append("## Changes Since Last Iteration")
+            brief.append(f"- Modified files: {len(diff_summary['changed_files'])}")
+            brief.append(f"- Summary: {diff_summary['overall_summary_stats']}")
+            brief.append("")
+            brief.append("### Key Modified Functions")
+            for func in diff_summary['key_modified_functions'][:10]:
+                brief.append(f"- {func}")
+            brief.append("")
+        
+        # User feedback
+        if user_feedback:
+            brief.append("## User Feedback")
+            brief.append(user_feedback)
+            brief.append("")
+        
+        # Key insights from previous iteration
+        if previous_output["planner_output"]:
+            brief.append("## Previous Planning Context")
+            brief.append("(Truncated for brevity)")
+            # Extract key sections from planner output
+            lines = previous_output["planner_output"].split('\n')
+            for i, line in enumerate(lines):
+                if "Project Structure Summary" in line or "Key Technologies" in line:
+                    brief.extend(lines[i:i+10])
+                    brief.append("...")
+                    break
+            brief.append("")
+        
+        return '\n'.join(brief)
+
+def main_iterate():
+    """Main entry point for iteration mode"""
+    try:
+        print("Running in iteration mode...")
+        
+        # Parse iteration-specific arguments
+        current_repo_path = None
+        previous_output_path = None
+        user_feedback_file = None
+        output_path = Path("iteration-brief.md")
+        
+        i = 2  # Skip 'dump_ultra.py' and 'iterate'
+        while i < len(sys.argv):
+            arg = sys.argv[i]
+            if arg == '--current-repo-path' and i + 1 < len(sys.argv):
+                current_repo_path = Path(sys.argv[i + 1])
+                i += 2
+            elif arg == '--previous-repo2file-output' and i + 1 < len(sys.argv):
+                previous_output_path = Path(sys.argv[i + 1])
+                i += 2
+            elif arg == '--user-feedback-file' and i + 1 < len(sys.argv):
+                user_feedback_file = Path(sys.argv[i + 1])
+                i += 2
+            elif arg == '--output' and i + 1 < len(sys.argv):
+                output_path = Path(sys.argv[i + 1])
+                i += 2
+            else:
+                i += 1
+        
+        # Validate required arguments
+        if not current_repo_path or not previous_output_path:
+            print("Error: Both --current-repo-path and --previous-repo2file-output are required")
+            sys.exit(1)
+        
+        if not current_repo_path.exists():
+            print(f"Error: Repository path '{current_repo_path}' does not exist")
+            sys.exit(1)
+        
+        if not previous_output_path.exists():
+            print(f"Error: Previous output file '{previous_output_path}' does not exist")
+            sys.exit(1)
+        
+        # Load user feedback if provided
+        user_feedback = ""
+        if user_feedback_file and user_feedback_file.exists():
+            with open(user_feedback_file, 'r') as f:
+                user_feedback = f.read()
+        
+        # Create processor with default profile
+        profile = ProcessingProfile(
+            name="iteration",
+            token_budget=500000,
+            model="claude-3",
+            enable_git_insights=True
+        )
+        processor = UltraRepo2File(profile)
+        
+        # Initialize git analyzer
+        processor.git_analyzer = GitAnalyzer(current_repo_path)
+        
+        # Extract content from previous output
+        print("Extracting content from previous output...")
+        previous_content = processor.extract_content_from_previous_output(previous_output_path)
+        
+        # Generate iteration brief
+        print("Generating iteration brief...")
+        iteration_brief = processor.generate_iteration_brief(
+            current_repo_path,
+            previous_content,
+            user_feedback
+        )
+        
+        # Write output
+        with open(output_path, 'w') as f:
+            f.write(iteration_brief)
+        
+        print(f"Iteration brief written to: {output_path}")
+        
+        # Also generate a new repo2file output with the updated context
+        print("\nGenerating updated repo2file output...")
+        new_output_path = output_path.with_stem(f"{output_path.stem}-repo2file")
+        
+        # Update profile with extracted information
+        profile.vibe_statement = previous_content["vibe_statement"]
+        profile.planner_output = previous_content["planner_output"]
+        
+        # Process repository with updated context
+        processor.process_repository(current_repo_path, new_output_path)
+        
+        print(f"Updated repo2file output written to: {new_output_path}")
+        
+    except Exception as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
 
 def main():
     """Main entry point"""
-    if len(sys.argv) < 3:
-        print("Usage: python dump_ultra.py <repo_path> <output_file> [profile_file] [options]")
-        print("\nOptions:")
-        print("  --model MODEL      LLM model to optimize for (default: gpt-4)")
-        print("  --budget TOKENS    Token budget (default: 500000)")
-        print("  --profile NAME     Use named profile")
-        print("  --exclude PATTERN  Add exclusion pattern")
-        print("  --boost PATTERN    Boost priority for files matching pattern")
-        print("  --manifest         Generate hierarchical manifest")
-        print("  --truncation MODE  Truncation strategy (semantic, basic, middle_summarize, business_logic)")
-        print("\nExamples:")
-        print("  python dump_ultra.py ./myrepo output.txt")
-        print("  python dump_ultra.py ./myrepo output.txt --model claude-3 --budget 200000")
-        print("  python dump_ultra.py ./myrepo output.txt --exclude '*.log' --boost '*.py:0.5'")
-        sys.exit(1)
-    
-    repo_path = Path(sys.argv[1])
-    output_path = Path(sys.argv[2])
-    
-    # Parse arguments
-    profile = ProcessingProfile(
-        name="default",
-        token_budget=DEFAULT_TOKEN_BUDGET,
-        model="gpt-4"
-    )
-    
-    # Process profile first
-    i = 3
-    while i < len(sys.argv):
-        arg = sys.argv[i]
-        if arg == '--profile' and i + 1 < len(sys.argv):
-            profile_name = sys.argv[i + 1]
-            print(f"Loading profile: {profile_name}")
-            # Load from app/profiles.py
-            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            from app.profiles import DEFAULT_PROFILES
-            if profile_name in DEFAULT_PROFILES:
-                app_profile = DEFAULT_PROFILES[profile_name]
-                # Convert app profile to dump_ultra profile
-                print(f"Profile model: {app_profile.model}")
-                profile = ProcessingProfile(
-                    name=app_profile.name,
-                    token_budget=app_profile.token_budget,
-                    model=app_profile.model,
-                    exclude_patterns=app_profile.exclude_patterns,
-                    generate_manifest=getattr(app_profile, 'generate_manifest', True),
-                    truncation_strategy=getattr(app_profile, 'truncation_strategy', 'semantic')
-                )
-                # Copy priority patterns if they exist
-                if hasattr(app_profile, 'priority_patterns'):
-                    for pattern, score in app_profile.priority_patterns.items():
-                        profile.priority_boost[pattern] = score
+    try:
+        print(f"Arguments: {sys.argv}")
+        
+        # Check for iterate mode
+        if len(sys.argv) >= 2 and sys.argv[1] == 'iterate':
+            return main_iterate()
+        
+        if len(sys.argv) < 3:
+            print("Usage: python dump_ultra.py <repo_path> <output_file> [profile_file] [options]")
+            print("       python dump_ultra.py iterate --current-repo-path <path> --previous-repo2file-output <path> [options]")
+            print("\nOptions:")
+            print("  --model MODEL      LLM model to optimize for (default: gpt-4)")
+            print("  --budget TOKENS    Token budget (default: 500000)")
+            print("  --profile NAME     Use named profile")
+            print("  --exclude PATTERN  Add exclusion pattern")
+            print("  --boost PATTERN    Boost priority for files matching pattern")
+            print("  --manifest         Generate hierarchical manifest")
+            print("  --truncation MODE  Truncation strategy (semantic, basic, middle_summarize, business_logic)")
+            print("  --query TEXT       Intended LLM query for context-aware prioritization")
+            print("  --vibe TEXT        High-level goal/vibe statement for Gemini planner")
+            print("  --planner TEXT     AI planner output to integrate into coder context")
+            print("  --git-insights     Enable git history insights")
+            print("\nIteration Mode Options:")
+            print("  --current-repo-path PATH      Current repository path")
+            print("  --previous-repo2file-output PATH   Previous repo2file output to compare")
+            print("  --user-feedback-file PATH     Optional file with user feedback")
+            print("  --output PATH                 Output file for iteration brief (default: iteration-brief.md)")
+            print("\nExamples:")
+            print("  python dump_ultra.py ./myrepo output.txt")
+            print("  python dump_ultra.py ./myrepo output.txt --model claude-3 --budget 200000")
+            print("  python dump_ultra.py ./myrepo output.txt --exclude '*.log' --boost '*.py:0.5'")
+            print("  python dump_ultra.py ./myrepo output.txt --vibe 'Improve checkout speed' --planner 'plan.txt'")
+            print("  python dump_ultra.py iterate --current-repo-path ./myrepo --previous-repo2file-output output.txt")
+            sys.exit(1)
+        
+        repo_path = Path(sys.argv[1])
+        output_path = Path(sys.argv[2])
+        
+        # Parse arguments
+        profile = ProcessingProfile(
+            name="default",
+            token_budget=DEFAULT_TOKEN_BUDGET,
+            model="gpt-4"
+        )
+        
+        # Process profile first
+        i = 3
+        while i < len(sys.argv):
+            arg = sys.argv[i]
+            if arg == '--profile' and i + 1 < len(sys.argv):
+                profile_name = sys.argv[i + 1]
+                print(f"Loading profile: {profile_name}")
+                # Load from app/profiles.py
+                sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                from app.profiles import DEFAULT_PROFILES
+                if profile_name in DEFAULT_PROFILES:
+                    app_profile = DEFAULT_PROFILES[profile_name]
+                    # Convert app profile to dump_ultra profile
+                    print(f"Profile model: {app_profile.model}")
+                    profile = ProcessingProfile(
+                        name=app_profile.name,
+                        token_budget=app_profile.token_budget,
+                        model=app_profile.model,
+                        exclude_patterns=app_profile.exclude_patterns,
+                        generate_manifest=getattr(app_profile, 'generate_manifest', True),
+                        truncation_strategy=getattr(app_profile, 'truncation_strategy', 'semantic'),
+                        enable_git_insights=app_profile.name == 'gemini'  # Enable for Gemini profile
+                    )
+                    # Copy priority patterns if they exist
+                    if hasattr(app_profile, 'priority_patterns'):
+                        for pattern, score in app_profile.priority_patterns.items():
+                            profile.priority_boost[pattern] = score
+                else:
+                    # Try loading as a file path for backwards compatibility
+                    profile_path = Path(profile_name)
+                    if profile_path.exists():
+                        profile = ProcessingProfile.load(profile_path)
+                i += 2
             else:
-                # Try loading as a file path for backwards compatibility
-                profile_path = Path(profile_name)
-                if profile_path.exists():
-                    profile = ProcessingProfile.load(profile_path)
-            i += 2
-        else:
-            i += 1
+                i += 1
+        
+        # Then process other arguments (which may override profile settings)
+        i = 3
+        while i < len(sys.argv):
+            arg = sys.argv[i]
+            if arg == '--model' and i + 1 < len(sys.argv):
+                model_arg = sys.argv[i + 1]
+                print(f"Setting model from arg: '{model_arg}'")
+                if model_arg:  # Only set if not empty
+                    profile.model = model_arg
+                i += 2
+            elif arg == '--budget' and i + 1 < len(sys.argv):
+                profile.token_budget = int(sys.argv[i + 1])
+                i += 2
+            elif arg == '--exclude' and i + 1 < len(sys.argv):
+                profile.exclude_patterns.append(sys.argv[i + 1])
+                i += 2
+            elif arg == '--boost' and i + 1 < len(sys.argv):
+                pattern, boost = sys.argv[i + 1].split(':')
+                profile.priority_boost[pattern] = float(boost)
+                i += 2
+            elif arg == '--profile':
+                # Skip - already processed in first pass
+                i += 2
+            elif arg == '--manifest':
+                profile.generate_manifest = True
+                i += 1
+            elif arg == '--truncation' and i + 1 < len(sys.argv):
+                profile.truncation_strategy = sys.argv[i + 1]
+                i += 2
+            elif arg == '--query' and i + 1 < len(sys.argv):
+                profile.intended_query = sys.argv[i + 1]
+                i += 2
+            elif arg == '--vibe' and i + 1 < len(sys.argv):
+                profile.vibe_statement = sys.argv[i + 1]
+                i += 2
+            elif arg == '--planner' and i + 1 < len(sys.argv):
+                # Check if it's a file path or direct text
+                planner_arg = sys.argv[i + 1]
+                if os.path.exists(planner_arg):
+                    with open(planner_arg, 'r') as f:
+                        profile.planner_output = f.read()
+                else:
+                    profile.planner_output = planner_arg
+                i += 2
+            elif arg == '--git-insights':
+                profile.enable_git_insights = True
+                i += 1
+            else:
+                i += 1
+        
+        # Process repository
+        processor = UltraRepo2File(profile)
+        processor.process_repository(repo_path, output_path)
     
-    # Then process other arguments (which may override profile settings)
-    i = 3
-    while i < len(sys.argv):
-        arg = sys.argv[i]
-        if arg == '--model' and i + 1 < len(sys.argv):
-            model_arg = sys.argv[i + 1]
-            print(f"Setting model from arg: '{model_arg}'")
-            if model_arg:  # Only set if not empty
-                profile.model = model_arg
-            i += 2
-        elif arg == '--budget' and i + 1 < len(sys.argv):
-            profile.token_budget = int(sys.argv[i + 1])
-            i += 2
-        elif arg == '--exclude' and i + 1 < len(sys.argv):
-            profile.exclude_patterns.append(sys.argv[i + 1])
-            i += 2
-        elif arg == '--boost' and i + 1 < len(sys.argv):
-            pattern, boost = sys.argv[i + 1].split(':')
-            profile.priority_boost[pattern] = float(boost)
-            i += 2
-        elif arg == '--profile':
-            # Skip - already processed in first pass
-            i += 2
-        elif arg == '--manifest':
-            profile.generate_manifest = True
-            i += 1
-        elif arg == '--truncation' and i + 1 < len(sys.argv):
-            profile.truncation_strategy = sys.argv[i + 1]
-            i += 2
-        else:
-            i += 1
-    
-    # Process repository
-    processor = UltraRepo2File(profile)
-    processor.process_repository(repo_path, output_path)
+    except Exception as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()

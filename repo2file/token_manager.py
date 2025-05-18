@@ -1,7 +1,11 @@
 """
 Advanced token management for repo2file
 """
-import tiktoken
+try:
+    import tiktoken
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    TIKTOKEN_AVAILABLE = False
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -48,15 +52,21 @@ class TokenBudget:
 class TokenManager:
     def __init__(self, model: str = "gpt-4", budget: int = 500000):
         self.model = model
-        try:
-            # Special case for Gemini models which use the same encoding as GPT-4
-            if model.startswith('gemini'):
-                self.encoder = tiktoken.get_encoding("cl100k_base")
-            else:
-                self.encoder = tiktoken.encoding_for_model(model)
-        except:
-            # Fallback to cl100k_base encoding
-            self.encoder = tiktoken.get_encoding("cl100k_base")
+        self.encoder = None
+        
+        if TIKTOKEN_AVAILABLE:
+            try:
+                # Special case for Gemini models which use the same encoding as GPT-4
+                if model.startswith('gemini'):
+                    self.encoder = tiktoken.get_encoding("cl100k_base")
+                else:
+                    self.encoder = tiktoken.encoding_for_model(model)
+            except:
+                # Fallback to cl100k_base encoding
+                try:
+                    self.encoder = tiktoken.get_encoding("cl100k_base")
+                except:
+                    self.encoder = None
         
         self.budget = TokenBudget(total=budget)
         self.cache: Dict[str, int] = {}
@@ -66,14 +76,20 @@ class TokenManager:
         if cache_key and cache_key in self.cache:
             return self.cache[cache_key]
         
-        try:
-            count = len(self.encoder.encode(text))
-            if cache_key:
-                self.cache[cache_key] = count
-            return count
-        except:
-            # Fallback to character-based estimation
-            return len(text) // 3
+        if self.encoder:
+            try:
+                count = len(self.encoder.encode(text))
+                if cache_key:
+                    self.cache[cache_key] = count
+                return count
+            except:
+                pass
+        
+        # Fallback to character-based estimation
+        count = len(text) // 3
+        if cache_key:
+            self.cache[cache_key] = count
+        return count
     
     def allocate_for_file(self, file_path: str, content: str, priority: float) -> Tuple[str, bool]:
         """Allocate tokens for a file and return potentially truncated content"""

@@ -18,6 +18,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const ultraSettings = document.getElementById('ultraSettings');
     const llmModelSelect = document.getElementById('llmModel');
     const tokenBudgetInput = document.getElementById('tokenBudget');
+    const vibeStatementInput = document.getElementById('vibeStatement');
+    const plannerOutputInput = document.getElementById('plannerOutput');
     const processBtn = document.getElementById('processBtn');
     const loadingIndicator = document.getElementById('loadingIndicator');
     const outputSection = document.getElementById('outputSection');
@@ -101,23 +103,35 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Tab switching
+    // Tab switching with ARIA support
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const tabId = btn.getAttribute('data-tab');
             
-            // Update active tab button
-            tabBtns.forEach(b => b.classList.remove('active'));
+            // Update active tab button and ARIA attributes
+            tabBtns.forEach(b => {
+                b.classList.remove('active');
+                b.setAttribute('aria-selected', 'false');
+            });
             btn.classList.add('active');
+            btn.setAttribute('aria-selected', 'true');
             
             // Show corresponding tab content
             tabContents.forEach(content => {
                 if (content.id === tabId) {
                     content.classList.remove('hidden');
+                    content.removeAttribute('hidden');
                 } else {
                     content.classList.add('hidden');
+                    content.setAttribute('hidden', 'true');
                 }
             });
+            
+            // Focus management for accessibility
+            const firstInput = document.querySelector(`#${tabId} input:not([hidden])`);
+            if (firstInput) {
+                setTimeout(() => firstInput.focus(), 100);
+            }
         });
     });
     
@@ -180,9 +194,20 @@ document.addEventListener('DOMContentLoaded', function() {
             const removeBtn = document.createElement('button');
             removeBtn.className = 'remove-file';
             removeBtn.innerHTML = '&times;';
+            removeBtn.setAttribute('aria-label', `Remove ${file.name}`);
+            removeBtn.setAttribute('title', `Remove ${file.name}`);
             removeBtn.addEventListener('click', () => {
                 uploadedFiles.splice(index, 1);
                 updateFileList();
+                
+                // Announce removal to screen readers
+                const announcement = document.createElement('div');
+                announcement.textContent = `${file.name} removed from file list`;
+                announcement.className = 'sr-only';
+                announcement.setAttribute('role', 'status');
+                announcement.setAttribute('aria-live', 'polite');
+                document.body.appendChild(announcement);
+                setTimeout(() => announcement.remove(), 1000);
             });
             
             fileItem.appendChild(fileName);
@@ -222,6 +247,24 @@ document.addEventListener('DOMContentLoaded', function() {
         if (ultraModeCheckbox.checked) {
             formData.append('llm_model', llmModelSelect.value);
             formData.append('token_budget', tokenBudgetInput.value);
+            
+            // Add intended query if provided
+            const intendedQuery = document.getElementById('intendedQuery').value.trim();
+            if (intendedQuery) {
+                formData.append('intended_query', intendedQuery);
+            }
+            
+            // Add vibe statement if provided
+            const vibeStatement = vibeStatementInput.value.trim();
+            if (vibeStatement) {
+                formData.append('vibe_statement', vibeStatement);
+            }
+            
+            // Add planner output if provided
+            const plannerOutput = plannerOutputInput.value.trim();
+            if (plannerOutput) {
+                formData.append('planner_output', plannerOutput);
+            }
         }
         
         // Add profile if selected
@@ -254,6 +297,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             formData.append('github_url', githubUrl);
+            
+            // Add branch if specified
+            const branchInput = document.getElementById('branchInput');
+            const branch = branchInput.value.trim();
+            if (branch) {
+                formData.append('github_branch', branch);
+            }
         }
         
         // Show loading indicator
@@ -359,13 +409,30 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(() => {
                 // Visual feedback for copy success
                 const originalText = copyBtn.textContent;
+                const originalAriaLabel = copyBtn.getAttribute('aria-label');
                 copyBtn.textContent = 'Copied!';
+                copyBtn.setAttribute('aria-label', 'Successfully copied to clipboard');
+                copyBtn.classList.add('success');
+                
+                // Announce to screen readers
+                const announcement = document.createElement('div');
+                announcement.textContent = 'Text successfully copied to clipboard';
+                announcement.className = 'sr-only';
+                announcement.setAttribute('role', 'status');
+                announcement.setAttribute('aria-live', 'polite');
+                document.body.appendChild(announcement);
+                
                 setTimeout(() => {
                     copyBtn.textContent = originalText;
+                    copyBtn.setAttribute('aria-label', originalAriaLabel);
+                    copyBtn.classList.remove('success');
+                    announcement.remove();
                 }, 2000);
             })
             .catch(err => {
                 showError('Failed to copy: ' + err);
+                copyBtn.classList.add('error');
+                setTimeout(() => copyBtn.classList.remove('error'), 2000);
             });
     });
     

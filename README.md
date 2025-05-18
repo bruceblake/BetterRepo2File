@@ -22,10 +22,11 @@ A web-based user interface for the [repo2file](https://github.com/artkulak/repo2
 - Configuration profiles for common use cases
 - REST API for programmatic access
 - Real-time preview capability
-- Multi-model support (GPT-4, GPT-3.5, Claude, Llama)
+- Multi-model support (GPT-4, GPT-3.5, Claude, Llama, Gemini 1.5 Pro)
 - Caching system for improved performance
 - Semantic code analysis with AST parsing
 - Parallel file processing
+- **Gemini 1.5 Pro Support**: Optimized profile with 1M token budget for large context windows ([detailed documentation](docs/GEMINI_FEATURES.md))
 
 ## Installation
 
@@ -61,9 +62,10 @@ A web-based user interface for the [repo2file](https://github.com/artkulak/repo2
 ### GitHub Repository
 1. Switch to the "GitHub URL" tab
 2. Enter a GitHub repository URL (e.g., `https://github.com/username/repo`)
-3. Optionally specify file types to include
-4. Click "Generate" to process
-5. View, download, or copy the consolidated output
+3. Optionally specify a branch (leave empty for default branch)
+4. Optionally specify file types to include
+5. Click "Generate" to process
+6. View, download, or copy the consolidated output
 
 ## API Usage
 
@@ -78,7 +80,8 @@ curl -X POST http://localhost:5000/api/v1/process \
     "github_url": "https://github.com/user/repo",
     "options": {
       "model": "gpt-4",
-      "token_budget": 500000
+      "token_budget": 500000,
+      "github_branch": "develop"
     }
   }'
 
@@ -99,6 +102,12 @@ The application includes pre-configured profiles for common use cases:
 - **Documentation**: Markdown and technical writing
 - **Mobile**: React Native and Flutter apps
 - **Microservices**: Multi-service architectures
+- **Gemini**: Optimized for Gemini 1.5 Pro with:
+  - 1M token budget for large context windows
+  - Hierarchical manifest generation for easy navigation
+  - Advanced truncation strategies (middle summarization)
+  - Business logic prioritization
+  - Automatic ultra mode configuration
 
 ## Architecture
 

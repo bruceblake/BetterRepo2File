@@ -129,7 +129,7 @@ DEFAULT_PROFILES = {
     
     'gemini': ProcessingProfile(
         name='gemini',
-        description='Optimized for Gemini 1.5 Pro with large context window',
+        description='Optimized for Gemini 1.5 Pro with large context window + Git insights',
         mode='ultra',
         model='gemini-1.5-pro',
         token_budget=1000000,  # 1M tokens for Gemini's large context

@@ -41,10 +41,12 @@ def process_files():
         "options": {
             "file_types": [".py", ".js"],
             "use_gitignore": true,
+            "github_branch": "develop",  # optional: specific branch to clone
             "model": "gpt-4",  # for ultra mode: gpt-4, gpt-3.5-turbo, claude-3, llama, gemini-1.5-pro
             "token_budget": 500000,  # for ultra mode
             "generate_manifest": true,  # for ultra mode
-            "truncation_strategy": "semantic"  # for ultra mode: semantic, basic, middle_summarize, business_logic
+            "truncation_strategy": "semantic",  # for ultra mode: semantic, basic, middle_summarize, business_logic
+            "intended_query": "What you plan to ask the LLM"  # optional: for ultra mode query-aware context
         }
     }
     """
@@ -68,12 +70,18 @@ def process_files():
         # Handle GitHub URL
         if 'github_url' in data:
             github_url = data['github_url']
+            github_branch = data.get('options', {}).get('github_branch', '').strip()
             repo_dir = os.path.join(temp_dir, 'repo')
             
             # Clone repository
             try:
-                subprocess.run(['git', 'clone', github_url, repo_dir], 
-                              check=True, capture_output=True, text=True)
+                # Clone with specific branch if provided
+                if github_branch:
+                    subprocess.run(['git', 'clone', '-b', github_branch, github_url, repo_dir], 
+                                  check=True, capture_output=True, text=True)
+                else:
+                    subprocess.run(['git', 'clone', github_url, repo_dir], 
+                                  check=True, capture_output=True, text=True)
                 input_path = repo_dir
             except subprocess.CalledProcessError as e:
                 return jsonify({'error': f'Failed to clone repository: {e.stderr}'}), 400
@@ -122,8 +130,11 @@ def process_files():
         file_types = options.get('file_types', [])
         use_gitignore = options.get('use_gitignore', True)
         
-        # Prepare command
-        cmd = [sys.executable, SCRIPT_PATHS[mode], input_path, output_file]
+        # Prepare command - run as module to avoid import issues
+        if mode == 'ultra':
+            cmd = [sys.executable, '-m', 'repo2file.dump_ultra', input_path, output_file]
+        else:
+            cmd = [sys.executable, SCRIPT_PATHS[mode], input_path, output_file]
         
         # Add mode-specific options
         if mode == 'ultra':
@@ -131,12 +142,25 @@ def process_files():
             budget = options.get('token_budget', 500000)
             generate_manifest = options.get('generate_manifest', False)
             truncation_strategy = options.get('truncation_strategy', 'semantic')
+            intended_query = options.get('intended_query', '').strip()
+            vibe_statement = options.get('vibe_statement', '').strip()
+            planner_output = options.get('planner_output', '').strip()
             
             cmd.extend(['--model', model, '--budget', str(budget)])
             if generate_manifest:
                 cmd.append('--manifest')
             if truncation_strategy:
                 cmd.extend(['--truncation', truncation_strategy])
+            if intended_query:
+                cmd.extend(['--query', intended_query])
+            if vibe_statement:
+                cmd.extend(['--vibe', vibe_statement])
+            if planner_output:
+                # Save planner output to a temporary file
+                planner_file = os.path.join(temp_dir, 'planner_output.txt')
+                with open(planner_file, 'w') as f:
+                    f.write(planner_output)
+                cmd.extend(['--planner', planner_file])
         else:
             # Standard modes use exclusion file
             gitignore_path = os.path.join(input_path, '.gitignore')

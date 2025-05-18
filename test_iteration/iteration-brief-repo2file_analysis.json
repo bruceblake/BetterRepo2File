@@ -1,0 +1,33 @@
+{
+  "action_blocks": {
+    "summary": {
+      "total_blocks": 0,
+      "by_type": {}
+    },
+    "blocks": [],
+    "insights": {
+      "high_priority_count": 0,
+      "most_connected_entities": [],
+      "most_changed_files": []
+    }
+  },
+  "codebase_analysis": {
+    "total_files": 125,
+    "total_size": 607869,
+    "languages": {
+      "python": 26,
+      "javascript": 1
+    },
+    "file_types": {
+      ".py": 26,
+      ".txt": 1,
+      ".sample": 13,
+      ".json": 1,
+      ".md": 8,
+      ".sh": 1,
+      ".html": 2,
+      ".css": 1,
+      ".js": 1
+    },
+    "primary_language": "python",
+    "frameworks": 

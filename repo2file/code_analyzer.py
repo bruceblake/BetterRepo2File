@@ -7,6 +7,7 @@ from typing import Dict, List, Set, Tuple, Optional
 from pathlib import Path
 from dataclasses import dataclass
 import json
+import string
 
 @dataclass
 class CodeEntity:
@@ -16,10 +17,17 @@ class CodeEntity:
     line_end: int
     dependencies: Set[str] = None
     importance_score: float = 0.0
+    calls: List[str] = None  # Functions/methods this entity calls
+    called_by: List[str] = None  # Functions/methods that call this entity
+    docstring: str = None  # Entity's docstring if available
     
     def __post_init__(self):
         if self.dependencies is None:
             self.dependencies = set()
+        if self.calls is None:
+            self.calls = []
+        if self.called_by is None:
+            self.called_by = []
 
 class CodeAnalyzer:
     def __init__(self):
@@ -47,6 +55,9 @@ class CodeAnalyzer:
         try:
             tree = ast.parse(content)
             
+            # First pass: collect all entities
+            entity_map = {}  # name -> entity mapping
+            
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
                     entity = CodeEntity(
@@ -56,12 +67,30 @@ class CodeAnalyzer:
                         line_end=node.end_lineno or node.lineno,
                         importance_score=0.8
                     )
+                    # Extract docstring
+                    entity.docstring = ast.get_docstring(node)
+                    
                     # Find methods
                     for item in node.body:
                         if isinstance(item, ast.FunctionDef):
+                            method_entity = CodeEntity(
+                                name=f"{node.name}.{item.name}",
+                                type='method',
+                                line_start=item.lineno,
+                                line_end=item.end_lineno or item.lineno,
+                                importance_score=0.6
+                            )
+                            method_entity.docstring = ast.get_docstring(item)
                             if item.name in ['__init__', '__call__']:
-                                entity.importance_score = 0.9
+                                method_entity.importance_score = 0.8
+                            entities.append(method_entity)
+                            entity_map[method_entity.name] = method_entity
+                            
+                            # Find calls within this method
+                            self._extract_calls(item, method_entity, entity_map)
+                    
                     entities.append(entity)
+                    entity_map[entity.name] = entity
                     
                 elif isinstance(node, ast.FunctionDef):
                     if node.col_offset == 0:  # Top-level function
@@ -72,7 +101,12 @@ class CodeAnalyzer:
                             line_end=node.end_lineno or node.lineno,
                             importance_score=0.7
                         )
+                        entity.docstring = ast.get_docstring(node)
                         entities.append(entity)
+                        entity_map[entity.name] = entity
+                        
+                        # Find calls within this function
+                        self._extract_calls(node, entity, entity_map)
                         
                 elif isinstance(node, ast.Import):
                     for alias in node.names:
@@ -81,6 +115,9 @@ class CodeAnalyzer:
                 elif isinstance(node, ast.ImportFrom):
                     if node.module:
                         imports.append(node.module)
+                        # Track specific imports for better call resolution
+                        for alias in node.names:
+                            imports.append(f"{node.module}.{alias.name}")
             
             # Analyze dependencies
             for entity in entities:
@@ -99,6 +136,34 @@ class CodeAnalyzer:
             'language': 'python',
             'metrics': self._calculate_metrics(entities, content)
         }
+    
+    def _extract_calls(self, node: ast.AST, entity: CodeEntity, entity_map: Dict[str, CodeEntity]) -> None:
+        """Extract function/method calls within an AST node"""
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call):
+                # Function call
+                call_name = None
+                
+                # Direct function call
+                if isinstance(child.func, ast.Name):
+                    call_name = child.func.id
+                # Method call
+                elif isinstance(child.func, ast.Attribute):
+                    # Try to reconstruct the full name
+                    if isinstance(child.func.value, ast.Name):
+                        call_name = f"{child.func.value.id}.{child.func.attr}"
+                    elif (hasattr(ast, 'Self') and isinstance(child.func.value, ast.Self)) or \
+                         (hasattr(child.func.value, 'id') and child.func.value.id == 'self'):
+                        call_name = f"self.{child.func.attr}"
+                    else:
+                        call_name = child.func.attr
+                
+                if call_name:
+                    entity.calls.append(call_name)
+                    
+                    # If this is a call to an entity we know about, update its called_by
+                    if call_name in entity_map:
+                        entity_map[call_name].called_by.append(entity.name)
     
     def _find_dependencies(self, code_block: str, known_imports: List[str]) -> Set[str]:
         """Find dependencies within a code block"""
@@ -309,3 +374,63 @@ class CodeAnalyzer:
             score += 0.1
         
         return min(max(score, 0.0), 1.0)  # Clamp between 0 and 1
+    
+    def calculate_query_relevance(self, query: str, file_path: Path, content: str, analysis: Dict) -> float:
+        """Calculate how relevant a file is to the intended query"""
+        if not query:
+            return 0.0
+        
+        # Normalize query for comparison
+        query_lower = query.lower()
+        query_words = set(word for word in query_lower.split() 
+                         if len(word) > 2 and word not in {'the', 'and', 'for', 'with', 'that'})
+        
+        relevance_score = 0.0
+        
+        # Check file path relevance
+        path_str = str(file_path).lower()
+        for word in query_words:
+            if word in path_str:
+                relevance_score += 0.3
+        
+        # Check file name relevance
+        filename = file_path.name.lower()
+        for word in query_words:
+            if word in filename:
+                relevance_score += 0.4
+        
+        # Check content relevance (sample for performance)
+        content_lower = content[:5000].lower()  # Only check first 5000 chars for performance
+        content_words = set(content_lower.split())
+        
+        # Count query word occurrences
+        matches = sum(1 for word in query_words if word in content_words)
+        if matches > 0:
+            relevance_score += min(matches * 0.1, 0.3)
+        
+        # Check entity names (classes, functions)
+        if 'entities' in analysis:
+            entity_names = {entity.name.lower() for entity in analysis['entities']}
+            for word in query_words:
+                for entity_name in entity_names:
+                    if word in entity_name or entity_name in word:
+                        relevance_score += 0.2
+                        break
+        
+        # Bonus for specific patterns
+        if any(pattern in query_lower for pattern in ['refactor', 'modify', 'change', 'update']):
+            # User wants to modify code - boost files with complex logic
+            if analysis.get('metrics', {}).get('complexity_score', 0) > 0.1:
+                relevance_score += 0.1
+        
+        if any(pattern in query_lower for pattern in ['test', 'testing', 'unit test']):
+            # User wants tests - boost test files
+            if 'test' in filename or 'spec' in filename:
+                relevance_score += 0.5
+        
+        if any(pattern in query_lower for pattern in ['api', 'endpoint', 'route']):
+            # User interested in APIs
+            if any(word in filename for word in ['api', 'route', 'controller', 'view']):
+                relevance_score += 0.3
+        
+        return min(relevance_score, 1.0)  # Cap at 1.0

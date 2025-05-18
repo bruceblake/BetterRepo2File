@@ -74,12 +74,18 @@ def process():
         elif 'github_url' in request.form and request.form['github_url']:
             # Handle GitHub repository URL
             github_url = request.form['github_url']
+            github_branch = request.form.get('github_branch', '').strip()
             repo_dir = os.path.join(temp_dir, 'repo')
             
             # Clone the repository
             try:
-                subprocess.run(['git', 'clone', github_url, repo_dir], 
-                              check=True, capture_output=True, text=True)
+                # Clone with specific branch if provided
+                if github_branch:
+                    subprocess.run(['git', 'clone', '-b', github_branch, github_url, repo_dir], 
+                                  check=True, capture_output=True, text=True)
+                else:
+                    subprocess.run(['git', 'clone', github_url, repo_dir], 
+                                  check=True, capture_output=True, text=True)
             except subprocess.CalledProcessError as e:
                 return jsonify({"error": f"Failed to clone repository: {e.stderr}"}), 400
             
@@ -123,12 +129,21 @@ def process():
             script_path = app.config['REPO2FILE_SMART_PATH'] if use_smart_mode else app.config['REPO2FILE_PATH']
         
         # Prepare command to run repo2file
-        cmd = [
-            sys.executable,  # Python interpreter
-            script_path,  # Path to dump.py or dump_smart.py
-            input_path,  # Input directory
-            output_file,  # Output file
-        ]
+        if use_ultra_mode:
+            # Run as module to avoid import issues
+            cmd = [
+                sys.executable,  # Python interpreter
+                '-m', 'repo2file.dump_ultra',
+                input_path,  # Input directory
+                output_file,  # Output file
+            ]
+        else:
+            cmd = [
+                sys.executable,  # Python interpreter
+                script_path,  # Path to dump.py or dump_smart.py
+                input_path,  # Input directory
+                output_file,  # Output file
+            ]
         
         # Add options based on version
         if use_ultra_mode:
@@ -139,6 +154,24 @@ def process():
                 cmd.extend(['--model', llm_model])
             if token_budget != '500000':
                 cmd.extend(['--budget', token_budget])
+            # Add intended query if provided
+            intended_query = request.form.get('intended_query', '').strip()
+            if intended_query:
+                cmd.extend(['--query', intended_query])
+            
+            # Add vibe statement if provided
+            vibe_statement = request.form.get('vibe_statement', '').strip()
+            if vibe_statement:
+                cmd.extend(['--vibe', vibe_statement])
+            
+            # Add planner output if provided
+            planner_output = request.form.get('planner_output', '').strip()
+            if planner_output:
+                # Save planner output to a temporary file
+                planner_file = os.path.join(temp_dir, 'planner_output.txt')
+                with open(planner_file, 'w') as f:
+                    f.write(planner_output)
+                cmd.extend(['--planner', planner_file])
         else:
             cmd.append(exclusion_file)  # Exclusion file (either .gitignore or default)
         
@@ -149,10 +182,14 @@ def process():
         # Run repo2file script
         process = subprocess.run(
             cmd,
-            check=True,
+            check=False,  # Don't raise exception, handle error manually
             capture_output=True,
             text=True
         )
+        
+        if process.returncode != 0:
+            error_msg = process.stderr if process.stderr else process.stdout
+            return jsonify({"error": f"Script failed: {error_msg}"}), 500
         
         # Check if output file was created
         if not os.path.exists(output_file):
