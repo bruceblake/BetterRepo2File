@@ -1,0 +1,26 @@
+{
+  "name": "betterrepo2file-tests",
+  "version": "1.0.0",
+  "description": "Test suite for BetterRepo2File",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^9.3.3",
+    "@testing-library/jest-dom": "^6.1.4",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": ["./jest.setup.js"],
+    "collectCoverageFrom": [
+      "../app/static/js/**/*.js"
+    ],
+    "testMatch": [
+      "**/test_*.js"
+    ]
+  }
+}

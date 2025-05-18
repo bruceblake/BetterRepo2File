@@ -4,27 +4,46 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile
+      target: base
+    container_name: betterrepo2file
     ports:
       - "5000:5000"
     volumes:
+      - ./app:/app/app
+      - ./repo2file:/app/repo2file
       - ./uploads:/app/uploads
       - ./temp:/app/temp
     environment:
       - FLASK_APP=app/app.py
       - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
     restart: unless-stopped
 
-  test-runner:
+  test:
+    build:
+      context: .
+      target: test-runner
+    container_name: betterrepo2file-tests
+    volumes:
+      - ./test_results:/app/test_results
+      - ./tests:/app/tests
+      - ./app:/app/app
+      - ./repo2file:/app/repo2file
+    environment:
+      - PYTHONPATH=/app
+    profiles:
+      - test
+
+  test-docker:
     build:
       context: .
       dockerfile: Dockerfile
       target: test-runner
+    container_name: betterrepo2file-test-docker
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./test_results:/test_results
+      - ./test_results:/app/test_results
     environment:
       - DOCKER_HOST=unix:///var/run/docker.sock
-    command: ["echo", "Test runner image built and ready"]
     profiles:
-      - test
+      - test-docker
