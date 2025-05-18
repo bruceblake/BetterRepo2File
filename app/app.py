@@ -8,6 +8,10 @@ import time
 import atexit
 import json
 from pathlib import Path
+
+# Add parent directory to Python path for module imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from werkzeug.utils import secure_filename
 from flask import Flask, request, render_template, jsonify, send_file, abort, Response
 from flask_cors import CORS
@@ -47,14 +51,31 @@ def send_progress(job_id, phase, current=0, total=0):
             'total': total
         })
 
-def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, previous_output, feedback_log):
+def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, previous_output, feedback_log, repo_type=None, repo_path_input=None, repo_url=None):
     """Process a job in the background"""
     try:
         send_progress(job_id, 'extracting', 0, 0)
         
-        # Handle file uploads
+        # Handle repository selection
         repo_path = None
-        if repo_file:
+        
+        if repo_type == 'local' and repo_path_input:
+            # Use local repository path
+            repo_path = repo_path_input
+            if not os.path.exists(repo_path):
+                raise Exception(f"Local repository path does not exist: {repo_path}")
+                
+        elif repo_type == 'github' and repo_url:
+            # Clone GitHub repository
+            repo_path = os.path.join(job_folder, 'repo')
+            try:
+                subprocess.run(['git', 'clone', repo_url, repo_path], 
+                              check=True, capture_output=True, text=True)
+            except subprocess.CalledProcessError as e:
+                raise Exception(f"Failed to clone repository: {e.stderr}")
+                
+        elif repo_file:
+            # Legacy file upload support
             if repo_file.filename.endswith('.zip'):
                 # Extract zip
                 zip_path = os.path.join(job_folder, 'repo.zip')
@@ -212,6 +233,11 @@ def analyze():
     previous_output = request.files.get('previous_output')
     feedback_log = request.files.get('feedback_log')
     
+    # Get repository information
+    repo_type = request.form.get('repo_type', '')  # 'local' or 'github'
+    repo_path = request.form.get('repo_path', '')  # Local path
+    repo_url = request.form.get('repo_url', '')    # GitHub URL
+    
     # Create job folder
     job_folder = os.path.join(app.config['JOBS_FOLDER'], job_id)
     os.makedirs(job_folder, exist_ok=True)
@@ -227,7 +253,7 @@ def analyze():
     }
     
     # Start processing in background thread
-    thread = threading.Thread(target=process_job, args=(job_id, job_folder, vibe, stage, repo_file, planner_output, previous_output, feedback_log))
+    thread = threading.Thread(target=process_job, args=(job_id, job_folder, vibe, stage, repo_file, planner_output, previous_output, feedback_log, repo_type, repo_path, repo_url))
     thread.start()
     
     return jsonify({'job_id': job_id}), 200
@@ -807,7 +833,99 @@ def run_tests():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/archive-feature', methods='POST']) 
+@app.route('/api/refine-prompt', methods=['POST'])
+def refine_prompt():
+    """Refine user prompt using LLM"""
+    try:
+        data = request.get_json()
+        prompt_text = data.get('prompt_text', '')
+        repo_info = data.get('repo_info', {})
+        target = data.get('target', 'planning')
+        
+        # Get repository context
+        context_summary = ''
+        try:
+            if repo_info.get('type') == 'local':
+                repo_path = repo_info.get('path')
+                if repo_path and os.path.exists(repo_path):
+                    # Analyze repository to get context
+                    from repo2file.code_analyzer import CodeAnalyzer
+                    analyzer = CodeAnalyzer()
+                    
+                    # Get basic project info
+                    project_info = analyzer._detect_project_type(Path(repo_path))
+                    language = analyzer._detect_primary_language(Path(repo_path))
+                    
+                    context_summary = f"Project type: {project_info}, Primary language: {language}"
+                else:
+                    context_summary = "Repository path not found"
+            elif repo_info.get('type') == 'github':
+                # For GitHub, we'd need to clone first or use the GitHub API
+                context_summary = f"GitHub repository: {repo_info.get('url')}"
+            else:
+                context_summary = "Unknown repository type"
+        except Exception as e:
+            print(f"Error getting repo context: {e}")
+            context_summary = "Unable to analyze repository"
+        
+        # Import LLMAugmenter
+        from repo2file.llm_augmenter import LLMAugmenter
+        
+        # Initialize augmenter with explicit provider
+        augmenter = LLMAugmenter(provider="gemini")
+        
+        if not augmenter.is_available():
+            return jsonify({'error': 'LLM service not available. Please set GEMINI_API_KEY environment variable.'}), 503
+        
+        # Refine the prompt
+        refined = augmenter.refine_user_prompt(prompt_text, context_summary, target)
+        
+        # Check if prompt is large and needs chunking
+        if len(refined) > 1500:  # Character threshold
+            chunks = augmenter.chunk_large_prompt(refined)
+            return jsonify({
+                'refined_prompt': refined,
+                'chunks': chunks,
+                'is_chunked': True
+            })
+        
+        return jsonify({
+            'refined_prompt': refined,
+            'is_chunked': False
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/audit-code', methods=['POST'])
+def audit_code():
+    """Perform security and quality audit on code changes"""
+    try:
+        data = request.get_json()
+        diff_text = data.get('diff_text', '')
+        changed_files = data.get('changed_files', {})
+        checklist = data.get('checklist', '')
+        
+        # Import LLMAugmenter
+        from repo2file.llm_augmenter import LLMAugmenter
+        
+        # Initialize augmenter
+        augmenter = LLMAugmenter()
+        
+        if not augmenter.is_available():
+            return jsonify({'error': 'LLM service not available'}), 503
+        
+        # Perform audit
+        result = augmenter.perform_code_audit(diff_text, changed_files, checklist)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/archive-feature', methods=['POST']) 
 def archive_feature():
     """Archive completed feature for future reference"""
     try:
@@ -853,6 +971,99 @@ def archive_feature():
             'path': feature_dir
         })
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/list-rules')
+def list_rules():
+    """List markdown files in the instructions directory"""
+    try:
+        # First check if request has repo_path
+        repo_path = request.args.get('repo_path', '.')
+        instructions_dir = os.path.join(repo_path, 'instructions')
+        
+        # Create directory if it doesn't exist
+        if not os.path.exists(instructions_dir):
+            os.makedirs(instructions_dir, exist_ok=True)
+        
+        rules = []
+        if os.path.exists(instructions_dir):
+            for filename in os.listdir(instructions_dir):
+                if filename.endswith('.md'):
+                    filepath = os.path.join(instructions_dir, filename)
+                    stat = os.stat(filepath)
+                    rules.append({
+                        'id': filename.replace('.md', '').replace(' ', '-').lower(),
+                        'filename': filename,
+                        'name': filename.replace('.md', '').replace('_', ' ').title(),
+                        'size': stat.st_size,
+                        'modified': stat.st_mtime
+                    })
+        
+        return jsonify({
+            'success': True,
+            'rules': sorted(rules, key=lambda x: x['name'])
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/list-rule-templates')
+def list_rule_templates():
+    """List available rule templates"""
+    try:
+        templates_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'starter_rules')
+        
+        templates = []
+        template_info = {
+            'general_ai_coding_guardrails.md': 'General best practices for AI-assisted coding',
+            'nextjs_supabase_tailwind_best_practices.md': 'Best practices for Next.js + Supabase + Tailwind stack',
+            'react_typescript_patterns.md': 'React with TypeScript patterns and conventions'
+        }
+        
+        if os.path.exists(templates_dir):
+            for filename in os.listdir(templates_dir):
+                if filename.endswith('.md'):
+                    templates.append({
+                        'filename': filename,
+                        'name': filename.replace('.md', '').replace('_', ' ').title(),
+                        'description': template_info.get(filename, 'Custom rule template')
+                    })
+        
+        return jsonify({
+            'success': True,
+            'templates': sorted(templates, key=lambda x: x['name'])
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/import-rule-template', methods=['POST'])
+def import_rule_template():
+    """Import a rule template to the project"""
+    try:
+        data = request.get_json()
+        template_filename = data.get('template_filename')
+        repo_path = data.get('repo_path', '.')
+        
+        # Source and destination paths
+        templates_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'starter_rules')
+        source_path = os.path.join(templates_dir, template_filename)
+        
+        instructions_dir = os.path.join(repo_path, 'instructions')
+        os.makedirs(instructions_dir, exist_ok=True)
+        
+        dest_path = os.path.join(instructions_dir, template_filename)
+        
+        # Check if template exists
+        if not os.path.exists(source_path):
+            return jsonify({'error': 'Template not found'}), 404
+        
+        # Copy the template
+        shutil.copy2(source_path, dest_path)
+        
+        return jsonify({
+            'success': True,
+            'imported_as': template_filename
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

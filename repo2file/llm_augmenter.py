@@ -353,3 +353,216 @@ QUESTIONS:"""
             'output_tokens': 0,
             'api_calls': 0
         }
+    
+    def refine_user_prompt(self, prompt_text: str, context_summary: str, target: str = "planning") -> str:
+        """
+        Refine a user's feature vibe into a more detailed prompt
+        
+        Args:
+            prompt_text: Original user prompt
+            context_summary: Brief summary of project context
+            target: Target agent ("planning" or "coding")
+        
+        Returns:
+            Refined prompt text
+        """
+        refine_prompt = f"""You are a senior software architect helping refine feature requirements.
+
+User wants to implement: '{prompt_text}'
+Project context: '{context_summary}'
+
+Refine this into a more detailed, actionable prompt suitable for an AI {'planning' if target == 'planning' else 'coding'} agent.
+Focus on clarity, breaking it down into 2-3 key aspects if complex.
+
+Refined prompt:"""
+        
+        response = self._generate(refine_prompt, max_tokens=300, temperature=0.5)
+        return response.strip() if response else prompt_text
+    
+    def chunk_large_prompt(self, prompt_text: str, max_chunks: int = 3) -> List[str]:
+        """
+        Break a large feature request into smaller, manageable chunks
+        
+        Args:
+            prompt_text: Large feature request
+            max_chunks: Maximum number of chunks to create
+        
+        Returns:
+            List of sub-tasks
+        """
+        chunk_prompt = f"""Break this large feature request into {max_chunks} or fewer logical, sequential sub-tasks 
+that can be planned and implemented independently or in sequence:
+
+Feature request: '{prompt_text}'
+
+Output each sub-task on a new line, numbered:"""
+        
+        response = self._generate(chunk_prompt, max_tokens=400, temperature=0.5)
+        
+        if not response:
+            return [prompt_text]
+        
+        lines = response.strip().split('\n')
+        chunks = []
+        for line in lines:
+            # Remove numbering and clean up
+            cleaned = line.strip()
+            if cleaned and any(char.isalpha() for char in cleaned):
+                # Remove leading numbers and dots
+                cleaned = cleaned.lstrip('0123456789. ')
+                if cleaned:
+                    chunks.append(cleaned)
+        
+        return chunks[:max_chunks] if chunks else [prompt_text]
+    
+    def perform_code_audit(self, diff_text: str, changed_files_content: Dict[str, str], 
+                          audit_checklist_text: str) -> Dict:
+        """
+        Perform security and quality audit on code changes
+        
+        Args:
+            diff_text: Git diff text
+            changed_files_content: Dict of filename to file content
+            audit_checklist_text: Security/quality checklist
+        
+        Returns:
+            Dict with findings and raw output
+        """
+        # Prepare file context
+        file_context = "\n\n".join([
+            f"=== {filename} ===\n{content[:2000]}"  # Limit content size
+            for filename, content in changed_files_content.items()
+        ])
+        
+        audit_prompt = f"""You are a senior software engineer and security expert. 
+Review the following code changes (diff provided) within the context of the full files.
+
+DIFF:
+{diff_text[:3000]}  # Limit diff size
+
+FILE CONTEXT:
+{file_context}
+
+AUDIT CHECKLIST:
+{audit_checklist_text}
+
+Identify potential security vulnerabilities, bugs, or deviations from common best practices.
+Output findings as a bulleted list:
+* [Severity: High/Med/Low] file_path:line_number - Issue description
+
+If no issues found, respond with: "No significant issues found."
+
+Findings:"""
+        
+        response = self._generate(audit_prompt, max_tokens=800, temperature=0.3)
+        
+        if not response:
+            return {"findings": [], "error": "No response from LLM"}
+        
+        findings_text = response.strip()
+        
+        # Parse findings
+        findings = []
+        if "No significant issues found" not in findings_text:
+            for line in findings_text.split('\n'):
+                if line.strip().startswith('*'):
+                    findings.append(self._parse_finding(line))
+        
+        return {"findings": findings, "raw_output": findings_text}
+    
+    def _parse_finding(self, finding_line: str) -> Dict:
+        """Parse a single finding from the audit output"""
+        # Example: * [Severity: High] auth.py:45 - SQL injection vulnerability
+        parts = finding_line.strip().split(' - ', 1)
+        if len(parts) == 2:
+            prefix, description = parts
+            severity_match = prefix.find('[Severity:')
+            if severity_match != -1:
+                severity_end = prefix.find(']', severity_match)
+                severity = prefix[severity_match+10:severity_end].strip()
+                location = prefix[severity_end+1:].strip()
+                
+                return {
+                    "severity": severity,
+                    "location": location,
+                    "description": description.strip()
+                }
+        
+        return {
+            "severity": "Unknown",
+            "location": "",
+            "description": finding_line.strip()
+        }
+    
+    def suggest_debug_solutions(self, test_failures: List[Dict], related_code: Dict[str, str]) -> List[Dict]:
+        """
+        Suggest debugging solutions for test failures
+        
+        Args:
+            test_failures: List of test failure dictionaries
+            related_code: Dict of filename to code content
+        
+        Returns:
+            List of debug suggestions
+        """
+        # Format test failures
+        failures_text = "\n".join([
+            f"Test: {failure.get('test_name', 'Unknown')}\n"
+            f"Error: {failure.get('error_message', 'No message')}\n"
+            f"Stack: {failure.get('stack_trace', 'No trace')[:500]}\n"
+            for failure in test_failures[:5]  # Limit to 5 failures
+        ])
+        
+        # Format related code
+        code_context = "\n\n".join([
+            f"=== {filename} ===\n{content[:1000]}"
+            for filename, content in related_code.items()
+        ])[:3000]  # Limit total size
+        
+        debug_prompt = f"""The following tests are failing:
+
+{failures_text}
+
+Related source code:
+{code_context}
+
+Based on these errors and the related source code, suggest:
+1. Top 3 likely root causes
+2. Specific locations to insert diagnostic logging
+3. Potential one-line fixes (if applicable)
+
+Format each suggestion as:
+SUGGESTION_TYPE: Root Cause|Logging|Fix
+FILE: filename
+LINE: line_number (approximate)
+ACTION: Description of what to do
+CODE: Actual code to add/change (if applicable)
+---"""
+        
+        response = self._generate(debug_prompt, max_tokens=1000, temperature=0.5)
+        
+        if not response:
+            return []
+        
+        # Parse suggestions
+        suggestions = []
+        current_suggestion = {}
+        
+        for line in response.split('\n'):
+            line = line.strip()
+            if line == '---' and current_suggestion:
+                suggestions.append(current_suggestion)
+                current_suggestion = {}
+            elif ':' in line:
+                key, value = line.split(':', 1)
+                key = key.strip().upper()
+                value = value.strip()
+                
+                if key in ['SUGGESTION_TYPE', 'FILE', 'LINE', 'ACTION', 'CODE']:
+                    current_suggestion[key.lower()] = value
+        
+        # Add last suggestion if exists
+        if current_suggestion:
+            suggestions.append(current_suggestion)
+        
+        return suggestions

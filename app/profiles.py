@@ -27,6 +27,7 @@ class ProcessingProfile:
     use_gitignore: bool = True
     truncation_strategy: str = "semantic"  # For ultra mode
     generate_manifest: bool = False  # For ultra mode
+    selected_rules: List[str] = field(default_factory=list)  # Selected project rules to inject
     
     def to_dict(self) -> Dict:
         """Convert to dictionary"""
@@ -41,7 +42,8 @@ class ProcessingProfile:
             'file_extensions': self.file_extensions,
             'priority_patterns': self.priority_patterns,
             'max_file_size': self.max_file_size,
-            'use_gitignore': self.use_gitignore
+            'use_gitignore': self.use_gitignore,
+            'selected_rules': self.selected_rules
         }
     
     @classmethod

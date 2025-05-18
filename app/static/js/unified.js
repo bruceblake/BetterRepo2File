@@ -6,7 +6,11 @@ class VibeCoderApp {
             mode: 'vibe',
             stage: null,
             vibe: '',
+            refinedVibe: '',
             repository: null,
+            repoPath: '',
+            repoUrl: '',
+            repoType: 'local', // 'local' or 'github'
             dockerEnabled: false,
             dockerServices: [],
             plannerOutput: '',
@@ -73,16 +77,31 @@ class VibeCoderApp {
                 parent.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 
-                // Show/hide content
-                const section = parent.nextElementSibling;
-                while (section && section.classList.contains('tab-content')) {
-                    section.classList.add('hidden');
-                    section = section.nextElementSibling;
-                }
-                
-                const content = document.getElementById(tab);
-                if (content) {
-                    content.classList.remove('hidden');
+                // Handle repo tab switching
+                if (parent.classList.contains('repo-tabs')) {
+                    // Hide all repo tab contents
+                    document.querySelectorAll('.repo-selection-section .tab-content').forEach(content => {
+                        content.classList.add('hidden');
+                    });
+                    // Show selected tab content
+                    const selectedContent = document.getElementById(tab);
+                    if (selectedContent) {
+                        selectedContent.classList.remove('hidden');
+                    }
+                    // Update repo type in state
+                    this.state.repoType = tab === 'repo-local-path' ? 'local' : 'github';
+                } else {
+                    // Original tab handling for other tabs
+                    const section = parent.nextElementSibling;
+                    while (section && section.classList.contains('tab-content')) {
+                        section.classList.add('hidden');
+                        section = section.nextElementSibling;
+                    }
+                    
+                    const content = document.getElementById(tab);
+                    if (content) {
+                        content.classList.remove('hidden');
+                    }
                 }
             });
         });
@@ -120,7 +139,7 @@ class VibeCoderApp {
         }
         
         // Vibe statement
-        const vibeTextarea = document.getElementById('vibeStatement');
+        const vibeTextarea = document.getElementById('featureVibe');
         if (vibeTextarea) {
             vibeTextarea.addEventListener('input', (e) => {
                 this.state.vibe = e.target.value;
@@ -131,12 +150,38 @@ class VibeCoderApp {
             });
         }
         
+        // Repository inputs
+        const repoPathInput = document.getElementById('repoPathInput');
+        if (repoPathInput) {
+            repoPathInput.addEventListener('input', (e) => {
+                this.state.repoPath = e.target.value;
+            });
+        }
+        
+        const githubUrlInput = document.getElementById('githubUrlInputRepo');
+        if (githubUrlInput) {
+            githubUrlInput.addEventListener('input', (e) => {
+                this.state.repoUrl = e.target.value;
+            });
+        }
+        
         // Stage selection
         document.querySelectorAll('.stage-card').forEach(card => {
             card.addEventListener('click', () => {
                 document.querySelectorAll('.stage-card').forEach(c => c.classList.remove('active'));
                 card.classList.add('active');
                 this.state.stage = card.getAttribute('data-stage');
+                
+                // Dispatch stage change event for Vibe Guide
+                const stageMapping = {
+                    'A': 'planning',
+                    'B': 'coding',
+                    'C': 'iteration'
+                };
+                const event = new CustomEvent('vibeStageChanged', {
+                    detail: { stage: stageMapping[this.state.stage] }
+                });
+                document.dispatchEvent(event);
             });
         });
         
@@ -307,12 +352,17 @@ class VibeCoderApp {
     validateCurrentStep() {
         switch (this.currentStep) {
             case 1:
-                if (!this.state.repository && !document.getElementById('githubUrl').value && !document.getElementById('localPath')?.value) {
-                    alert('Please select a repository');
+                // Validate repository selection
+                if (this.state.repoType === 'local' && !this.state.repoPath) {
+                    alert('Please enter a local repository path');
+                    return false;
+                }
+                if (this.state.repoType === 'github' && !this.state.repoUrl) {
+                    alert('Please enter a GitHub repository URL');
                     return false;
                 }
                 if (!this.state.vibe) {
-                    alert('Please describe your vibe/goal');
+                    alert('Please describe your feature/goal');
                     return false;
                 }
                 return true;
@@ -369,10 +419,16 @@ class VibeCoderApp {
     }
     
     updateSummary() {
-        document.getElementById('repoSummary').textContent = 
-            this.state.repository ? this.state.repository.name : 
-            document.getElementById('githubUrl').value || 
-            document.getElementById('localPath')?.value || 'None';
+        // Update repository summary
+        let repoSummary = 'None';
+        if (this.state.repoType === 'local' && this.state.repoPath) {
+            repoSummary = `Local: ${this.state.repoPath}`;
+        } else if (this.state.repoType === 'github' && this.state.repoUrl) {
+            repoSummary = `GitHub: ${this.state.repoUrl}`;
+        } else if (this.state.repository) {
+            repoSummary = this.state.repository.name;
+        }
+        document.getElementById('repoSummary').textContent = repoSummary;
         
         document.getElementById('vibeSummary').textContent = this.state.vibe || 'None';
         
@@ -392,18 +448,17 @@ class VibeCoderApp {
         formData.append('vibe', this.state.vibe);
         formData.append('stage', this.state.stage);
         
-        // Add repository
+        // Add repository information
+        formData.append('repo_type', this.state.repoType);
+        if (this.state.repoType === 'local') {
+            formData.append('repo_path', this.state.repoPath);
+        } else if (this.state.repoType === 'github') {
+            formData.append('repo_url', this.state.repoUrl);
+        }
+        
+        // Add legacy repository support (files)
         if (this.state.repository) {
             formData.append('repo_zip', this.state.repository);
-        } else {
-            const githubUrl = document.getElementById('githubUrl').value;
-            if (githubUrl) {
-                formData.append('github_url', githubUrl);
-                const branch = document.getElementById('githubBranch').value;
-                if (branch) {
-                    formData.append('github_branch', branch);
-                }
-            }
         }
         
         // Add stage-specific data
@@ -633,7 +688,101 @@ class VibeCoderApp {
     }
 }
 
+// Global functions for HTML onclick
+async function refineVibe() {
+    const vibeTextarea = document.getElementById('featureVibe');
+    const vibe = vibeTextarea.value.trim();
+    
+    if (!vibe) {
+        alert('Please enter a feature description first');
+        return;
+    }
+    
+    // Validate repository selection
+    const app = window.vibeCoderApp;
+    if (app.state.repoType === 'local' && !app.state.repoPath) {
+        alert('Please enter a local repository path first');
+        return;
+    }
+    if (app.state.repoType === 'github' && !app.state.repoUrl) {
+        alert('Please enter a GitHub repository URL first');
+        return;
+    }
+    
+    // Get repository context
+    const repoInfo = app.state.repoType === 'local' 
+        ? { type: 'local', path: app.state.repoPath }
+        : { type: 'github', url: app.state.repoUrl };
+    
+    try {
+        // Show loading state
+        const refineBtn = document.querySelector('.refine-btn');
+        refineBtn.disabled = true;
+        refineBtn.innerHTML = '<span class="material-symbols-outlined">hourglass_empty</span> Analyzing...';
+        
+        const response = await fetch('/api/refine-prompt', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                prompt_text: vibe,
+                repo_info: repoInfo,
+                target: 'planning'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.refined_prompt) {
+            // Show refined vibe
+            const refinedDiv = document.getElementById('refinedVibe');
+            refinedDiv.innerHTML = `
+                <h4>AI-Refined Feature Description</h4>
+                <div class="vibe-content">${data.refined_prompt}</div>
+                <div class="actions">
+                    <button class="use-btn" onclick="useRefinedVibe()">Use This</button>
+                    <button class="cancel-btn" onclick="cancelRefinedVibe()">Cancel</button>
+                </div>
+            `;
+            refinedDiv.classList.remove('hidden');
+            
+            // Store in app state
+            window.vibeCoderApp.state.refinedVibe = data.refined_prompt;
+        } else {
+            alert('Failed to refine prompt: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error refining vibe:', error);
+        alert('Error connecting to refinement service');
+    } finally {
+        // Reset button state
+        const refineBtn = document.querySelector('.refine-btn');
+        refineBtn.disabled = false;
+        refineBtn.innerHTML = '<span class="material-symbols-outlined">auto_awesome</span> Refine with AI';
+    }
+}
+
+function useRefinedVibe() {
+    const vibeTextarea = document.getElementById('featureVibe');
+    vibeTextarea.value = window.vibeCoderApp.state.refinedVibe;
+    window.vibeCoderApp.state.vibe = window.vibeCoderApp.state.refinedVibe;
+    
+    // Update character count
+    const charCount = document.querySelector('.char-count');
+    if (charCount) {
+        charCount.textContent = `${vibeTextarea.value.length} characters`;
+    }
+    
+    cancelRefinedVibe();
+}
+
+function cancelRefinedVibe() {
+    const refinedDiv = document.getElementById('refinedVibe');
+    refinedDiv.classList.add('hidden');
+}
+
 // Initialize the app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-    new VibeCoderApp();
+    window.vibeCoderApp = new VibeCoderApp();
 });

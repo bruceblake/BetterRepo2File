@@ -107,11 +107,38 @@
                 <!-- Step 1: Feature Vibe -->
                 <div class="wizard-content" data-step="1">
                     <h3>Describe Your Feature</h3>
+                    
+                    <!-- Repository Selection -->
+                    <div class="repo-selection-section">
+                        <h4>Target Repository</h4>
+                        <nav class="tabs repo-tabs">
+                            <button class="tab-btn active" data-tab="repo-local-path">Local Path</button>
+                            <button class="tab-btn" data-tab="repo-github-url">GitHub URL</button>
+                        </nav>
+                        
+                        <div class="tab-content" id="repo-local-path">
+                            <label for="repoPathInput">Enter local repository path:</label>
+                            <input type="text" id="repoPathInput" placeholder="/path/to/your/local/repo" class="repo-input">
+                        </div>
+                        
+                        <div class="tab-content hidden" id="repo-github-url">
+                            <label for="githubUrlInputRepo">Enter GitHub repository URL:</label>
+                            <input type="text" id="githubUrlInputRepo" placeholder="https://github.com/username/repo" class="repo-input">
+                        </div>
+                    </div>
+                    
                     <div class="feature-vibe-section">
                         <label for="featureVibe">What feature do you want to implement?</label>
                         <textarea id="featureVibe" placeholder="e.g., Add Google OAuth login with user profile sync" rows="4"></textarea>
                         <span class="char-count">0 characters</span>
                         <p class="help-text">Be specific about what you want to build. This description will guide both Gemini and Claude throughout the development loop.</p>
+                    </div>
+                    <div class="prompt-refiner">
+                        <button class="refine-btn" onclick="refineVibe()">
+                            <span class="material-symbols-outlined">auto_awesome</span>
+                            Refine with AI
+                        </button>
+                        <div id="refinedVibe" class="refined-vibe hidden"></div>
                     </div>
                     <button class="next-btn">Next →</button>
                 </div>
@@ -242,6 +269,7 @@
                     <button class="tab-btn" data-tab="iteration">Iteration</button>
                     <button class="tab-btn" data-tab="logs">Container Logs</button>
                     <button class="tab-btn" data-tab="stats">Statistics</button>
+                    <button class="tab-btn" data-tab="rules">Project Rules</button>
                 </nav>
 
                 <div class="result-content" id="copy">
@@ -306,6 +334,26 @@
                     </div>
                 </div>
 
+                <div class="result-content hidden" id="rules">
+                    <div class="rules-management">
+                        <div class="rules-header">
+                            <h3>Project Rules & Guidelines</h3>
+                            <button class="import-rule-btn" onclick="showRuleTemplates()">
+                                <span class="material-symbols-outlined">add_circle</span>
+                                Import Template
+                            </button>
+                        </div>
+                        <div class="rules-list" id="rulesList">
+                            <!-- Rule files will be loaded here -->
+                        </div>
+                        <div class="selected-rules">
+                            <h4>Selected Rules for AI Context</h4>
+                            <p class="help-text">Selected rules will be included in Section B (Coder Context)</p>
+                            <div id="selectedRulesList"></div>
+                        </div>
+                    </div>
+                </div>
+
                 <button class="new-analysis">Start New Analysis</button>
             </section>
         </main>
@@ -337,5 +385,6 @@
     <script src="{{ url_for('static', filename='js/unified.js') }}"></script>
     <script src="{{ url_for('static', filename='js/loop.js') }}"></script>
     <script src="{{ url_for('static', filename='js/vibe-guide.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/rules-manager.js') }}"></script>
 </body>
 </html>

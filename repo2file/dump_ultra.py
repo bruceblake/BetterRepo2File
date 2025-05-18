@@ -449,6 +449,7 @@ class ProcessingProfile:
         'min_priority': 'medium',
         'include_private_methods': False
     })
+    auto_create_ai_guardrails_file: bool = True  # Auto-create ai_guardrails.md if missing
     
     def save(self, path: Path):
         with open(path, 'w') as f:
@@ -1562,6 +1563,9 @@ class UltraRepo2File:
                 print("Not a git repository - git insights disabled")
                 self.git_analyzer = None
         
+        # Check and create AI guardrails file if needed
+        self._check_and_create_ai_guardrails(repo_path)
+        
         # Load exclusion patterns
         exclusion_spec = self._load_exclusions(repo_path)
         
@@ -1725,6 +1729,34 @@ class UltraRepo2File:
         print(f"Total tokens used: {self.token_manager.budget.used:,}/{self.token_manager.budget.total:,}")
         print(f"Token utilization: {self.token_manager.budget.used/self.token_manager.budget.total*100:.1f}%")
     
+    def _check_and_create_ai_guardrails(self, repo_path: Path):
+        """Check for ai_guardrails.md and create if missing and configured"""
+        if not self.profile.auto_create_ai_guardrails_file:
+            return
+            
+        # Check for the vibe_coder_gemini_claude profile
+        if self.profile.name != 'vibe_coder_gemini_claude':
+            return
+            
+        ai_guardrails_path = repo_path / 'ai_guardrails.md'
+        
+        if not ai_guardrails_path.exists():
+            print("Creating ai_guardrails.md with default content...")
+            default_content = """IMPORTANT FOR AI CODER:
+1. Only modify code directly related to the current plan and instructions. Do not make unrelated changes or refactor code outside the immediate scope unless explicitly asked.
+2. Preserve existing comments and docstrings unless updating them is part of the task or they become inaccurate due to your changes.
+3. Ask for clarification if any instruction is ambiguous *before* making potentially incorrect changes.
+4. Follow existing code style and conventions in the project.
+5. If creating new files, place them in the most appropriate directory based on project structure.
+6. Always provide test cases for new functionality when applicable.
+7. Document any assumptions made during implementation.
+8. Keep security best practices in mind - never hardcode secrets or credentials.
+9. Make commits with clear, descriptive messages following the project's commit convention.
+10. If modifying build configurations or dependencies, ensure compatibility with existing requirements.
+"""
+            ai_guardrails_path.write_text(default_content)
+            print(f"Created ai_guardrails.md at {ai_guardrails_path}")
+    
     def _load_exclusions(self, repo_path: Path) -> pathspec.PathSpec:
         """Load exclusion patterns from .gitignore and custom patterns"""
         patterns = []
@@ -1783,7 +1815,7 @@ class UltraRepo2File:
         
         # Generate Claude Coder Super-Context section if planner output is provided
         if self.profile.planner_output:
-            header.extend(self._generate_claude_coder_context_header())
+            header.extend(self._generate_claude_coder_context_header(repo_path))
             header.extend(["", ""])  # Add some spacing
         
         # Standard header if no vibe coder features are enabled
@@ -1827,7 +1859,7 @@ class UltraRepo2File:
             "Copy and paste this section into your Planning AI.",
             "=" * 50,
             "",
-            "MY VIBE / PRIMARY GOAL:",
+            "INITIAL FEATURE VIBE/GOAL:",
             self.profile.vibe_statement,
             "",
             "PROJECT SNAPSHOT & HIGH-LEVEL CONTEXT:",
@@ -1882,7 +1914,7 @@ class UltraRepo2File:
         
         return section
     
-    def _generate_claude_coder_context_header(self) -> List[str]:
+    def _generate_claude_coder_context_header(self, repo_path: Path = None) -> List[str]:
         """Generate Section 2: Claude Coder Super-Context header"""
         section = []
         section.extend([
@@ -1890,10 +1922,48 @@ class UltraRepo2File:
             "SECTION 2: FOR AI CODING AGENT (e.g., Local Claude Code)",
             "This section contains the detailed codebase context and the plan from the AI Planning Agent.",
             "=" * 50,
+            ""
+        ])
+        
+        # Inject AI guardrails first if they exist
+        if repo_path:
+            ai_guardrails_path = repo_path / 'ai_guardrails.md'
+            if ai_guardrails_path.exists():
+                section.extend([
+                    "--- CRITICAL AI CODER GUARDRAILS (Read First!) ---",
+                    ai_guardrails_path.read_text().strip(),
+                    "--- END GUARDRAILS ---",
+                    ""
+                ])
+        
+        section.extend([
+            "REMINDER OF OVERALL GOAL:",
+            "INITIAL FEATURE VIBE/GOAL:",
+            self.profile.vibe_statement if self.profile.vibe_statement else "[No vibe statement provided]",
             "",
             "PLAN/INSTRUCTIONS FROM AI PLANNING AGENT (Gemini 1.5 Pro):",
             self.profile.planner_output,
-            "",
+            ""
+        ])
+        
+        # Inject selected project rules if any
+        if hasattr(self.profile, 'selected_rules') and self.profile.selected_rules and repo_path:
+            section.extend([
+                "--- IMPORTANT PROJECT RULES & GUIDELINES ---",
+                ""
+            ])
+            
+            # Read each selected rule file
+            for rule_file in self.profile.selected_rules:
+                rule_path = repo_path / 'instructions' / rule_file
+                if rule_path.exists():
+                    section.extend([
+                        f"### {rule_file}",
+                        rule_path.read_text(),
+                        ""
+                    ])
+        
+        section.extend([
             "--- DETAILED CODEBASE CONTEXT ---",
             ""
         ])
@@ -2041,9 +2111,9 @@ class UltraRepo2File:
         brief.append("# Iteration Brief for AI Planning Agent")
         brief.append("")
         
-        # Previous vibe/goals
+        # Original vibe/goals
         if previous_output["vibe_statement"]:
-            brief.append("## Previous Vibe/Goal")
+            brief.append("## RECAP OF ORIGINAL FEATURE VIBE/GOAL:")
             brief.append(previous_output["vibe_statement"])
             brief.append("")
         
@@ -2307,6 +2377,11 @@ def main():
             elif arg == '--git-insights':
                 profile.enable_git_insights = True
                 i += 1
+            elif arg == '--rules' and i + 1 < len(sys.argv):
+                # Accept comma-separated list of rule filenames
+                rule_files = sys.argv[i + 1].split(',')
+                profile.selected_rules = rule_files
+                i += 2
             else:
                 i += 1
         
