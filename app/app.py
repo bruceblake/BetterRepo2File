@@ -130,13 +130,41 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
         
         send_progress(job_id, 'analyzing', 0, 0)
         
+        # Clean the vibe statement to ensure no old repo references
+        if vibe and repo_url:
+            # Extract the repository name from URL
+            repo_name = repo_url.split('/')[-1].replace('.git', '')
+            owner = repo_url.split('/')[-2] if len(repo_url.split('/')) > 1 else ''
+            
+            # Check if vibe references a different repository
+            if 'MintWebsite' in vibe and 'MintWebsite' not in repo_url:
+                print(f"Warning: Vibe references MintWebsite but analyzing {repo_url}")
+                # Replace MintWebsite references with the actual repo name
+                vibe = vibe.replace('MintWebsite', repo_name)
+                vibe = vibe.replace('bruceblake/MintWebsite', f'{owner}/{repo_name}')
+                print(f"Cleaned vibe: {vibe[:200]}...")
+        
         # Build repo2file command based on stage
         # Run as module to handle relative imports correctly
         cmd = [sys.executable, '-m', 'repo2file.dump_ultra']
+        
+        # Add repository path as the first positional argument
+        if repo_path:
+            cmd.append(repo_path)
+        else:
+            print("WARNING: No repository path specified, using current directory")
+            cmd.append('.')
+        
+        # Use unique output file name to avoid caching issues
+        output_filename = f'output_{job_id}.txt'
+        output_path = os.path.join(job_folder, output_filename)
+        
+        # Add output path as the second positional argument
+        cmd.append(output_path)
+        
+        # Now add the options
         cmd.extend(['--profile', 'vibe_coder_gemini_claude'])
         cmd.extend(['--vibe', vibe])
-        cmd.extend(['--stage', stage])  # Add stage to command
-        cmd.extend(['--output', os.path.join(job_folder, 'output.txt')])
         
         if stage == 'B' and planner_output:
             # Save planner output to file
@@ -146,12 +174,16 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
             cmd.extend(['--planner', planner_file])
         
         elif stage == 'C':
+            # Stage C uses iteration mode - rebuild command differently
+            cmd = [sys.executable, '-m', 'repo2file.dump_ultra', 'iterate']
+            cmd.extend(['--current-repo-path', repo_path if repo_path else '.'])
             if previous_output:
-                cmd.extend(['--iterate', os.path.join(job_folder, 'previous_output.txt')])
+                cmd.extend(['--previous-repo2file-output', os.path.join(job_folder, 'previous_output.txt')])
             if feedback_log:
-                cmd.extend(['--feedback', os.path.join(job_folder, 'feedback.log')])
+                feedback_file = os.path.join(job_folder, 'feedback.log')
+                cmd.extend(['--user-feedback-file', feedback_file])
+            cmd.extend(['--output', output_path])
         
-        cmd.append(repo_path or '.')
         
         # Run the analysis
         print(f"Running command: {' '.join(cmd)}")
@@ -161,7 +193,8 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
         
         print(f"Process return code: {process.returncode}")
         if process.stdout:
-            print(f"Stdout: {process.stdout[:500]}...")
+            print(f"Stdout length: {len(process.stdout)}")
+            print(f"Stdout: {process.stdout}")  # Show full stdout for debugging
         if process.stderr:
             print(f"Stderr: {process.stderr}")  # Show full stderr for debugging
             
@@ -178,8 +211,14 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
         send_progress(job_id, 'finalizing', 100, 100)
         
         # Read the output and parse sections
-        output_file = os.path.join(job_folder, 'output.txt')
+        # First check the specific output file we requested
+        output_file = os.path.join(job_folder, output_filename)
         print(f"Looking for output file at: {output_file}")
+        
+        if not os.path.exists(output_file) and repo_path:
+            # Fallback to the profile name in the repo dir
+            output_file = os.path.join(repo_path, 'vibe_coder_gemini_claude')
+            print(f"Trying fallback location: {output_file}")
         
         # List all files in the job folder for debugging
         print(f"Files in job folder {job_folder}:")
@@ -189,7 +228,10 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
                 print(f"  {filepath} ({os.path.getsize(filepath)} bytes)")
         
         if not os.path.exists(output_file):
-            raise Exception(f"Output file not found at {output_file}")
+            # Last fallback to generic output.txt
+            output_file = os.path.join(job_folder, 'output.txt')
+            if not os.path.exists(output_file):
+                raise Exception(f"Output file not found at any expected location")
             
         print(f"Output file size: {os.path.getsize(output_file)} bytes")
         
@@ -1228,8 +1270,15 @@ def refine_prompt():
                 else:
                     context_summary = "Repository path not found"
             elif repo_info.get('type') == 'github':
-                # For GitHub, we'd need to clone first or use the GitHub API
-                context_summary = f"GitHub repository: {repo_info.get('url')}"
+                # Get repository name from URL
+                url = repo_info.get('url', '')
+                repo_parts = url.split('/')
+                if len(repo_parts) >= 2:
+                    repo_name = repo_parts[-1].replace('.git', '')
+                    owner = repo_parts[-2]
+                    context_summary = f"GitHub repository: {owner}/{repo_name} ({url})"
+                else:
+                    context_summary = f"GitHub repository: {url}"
             else:
                 context_summary = "Unknown repository type"
         except Exception as e:

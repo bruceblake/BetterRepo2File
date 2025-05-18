@@ -374,6 +374,8 @@ Project context: '{context_summary}'
 Refine this into a more detailed, actionable prompt suitable for an AI {'planning' if target == 'planning' else 'coding'} agent.
 Focus on clarity, breaking it down into 2-3 key aspects if complex.
 
+IMPORTANT: Base your refinement on the specific project mentioned in the context. Do not reference other projects or make assumptions about different repositories.
+
 Refined prompt:"""
         
         response = self._generate(refine_prompt, max_tokens=300, temperature=0.5)

@@ -3,369 +3,100 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Convert a repository or files to a single text file optimized for LLM prompts">
-    <meta name="keywords" content="repo2file, repository converter, LLM, AI, code consolidation">
-    <title>Repo2File - Vibe Coder Assistant</title>
+    <title>BetterRepo2File - Vibe Coder</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet">
 </head>
 <body>
     <div class="container">
-        <header role="banner">
-            <h1>Repo2File <span class="badge">Vibe Coder Edition</span></h1>
-            <p>Your AI-powered workflow assistant for Gemini planning → Claude coding</p>
+        <header>
+            <h1>BetterRepo2File</h1>
+            <p>AI-powered workflow for planning → coding</p>
         </header>
 
-        <main role="main">
-            <!-- Workflow Mode Selection -->
-            <section class="workflow-mode">
-                <h2>Select Your Workflow</h2>
-                <div class="mode-cards">
-                    <div class="mode-card active" id="vibe-mode">
-                        <span class="icon">🚀</span>
-                        <h3>Vibe Coder Workflow</h3>
-                        <p>Guided 3-stage workflow for AI planning and coding</p>
-                    </div>
-                    <div class="mode-card" id="classic-mode">
-                        <span class="icon">📄</span>
-                        <h3>Classic Repo2File</h3>
-                        <p>Traditional repo consolidation for any use case</p>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Vibe Coder Workflow -->
-            <section id="vibe-workflow" class="workflow-section">
-                <!-- Loop Dashboard (shown after first run) -->
-                <div id="loop-dashboard" class="loop-dashboard hidden">
-                    <div class="loop-status-bar">
-                        <div class="status-chip active" data-phase="planning">
-                            <span class="status-icon">💡</span> Planning
-                        </div>
-                        <div class="status-arrow">→</div>
-                        <div class="status-chip" data-phase="coding">
-                            <span class="status-icon">💻</span> Coding
-                        </div>
-                        <div class="status-arrow">→</div>
-                        <div class="status-chip" data-phase="diffing">
-                            <span class="status-icon">🔄</span> Diffing
-                        </div>
-                    </div>
-                    
-                    <div class="loop-info">
-                        <span class="loop-status stopped">Loop not started</span>
-                        <span class="iteration-count">Iteration: 0</span>
-                    </div>
-                    
-                    <div class="loop-actions">
-                        <button class="send-to-gemini" title="Copy Section C to Gemini">
-                            <span class="material-symbols-outlined">content_copy</span>
-                            Send to Gemini
-                        </button>
-                        <button class="send-to-claude" title="Copy Section B to Claude">
-                            <span class="material-symbols-outlined">content_copy</span>
-                            Send to Claude
-                        </button>
-                        <button class="rerun-tests" title="Run tests again">
-                            <span class="material-symbols-outlined">refresh</span>
-                            Rerun Tests
-                        </button>
-                        <button class="open-dashboard" title="Open Loop Dashboard" onclick="window.location.href='/loop-dashboard?session=' + window.unifiedState.sessionId">
-                            <span class="material-symbols-outlined">dashboard</span>
-                            Open Dashboard
-                        </button>
-                    </div>
-                    
-                    <div class="commit-history">
-                        <h4>Recent Commits</h4>
-                        <ul id="commit-list"></ul>
-                    </div>
-                </div>
-                
-                <div class="wizard-steps">
-                    <div class="step active" data-step="1">
+        <main>
+            <!-- Simple 3-Step Workflow -->
+            <div class="workflow-container">
+                <!-- Step 1: Feature Description -->
+                <div class="step-card" id="step1">
+                    <div class="step-header">
                         <span class="step-number">1</span>
-                        <span class="step-label">Feature</span>
+                        <h3>Describe Your Feature</h3>
                     </div>
-                    <div class="step" data-step="2">
+                    <div class="step-content">
+                        <div class="github-input">
+                            <input type="text" id="githubUrlInputRepo" placeholder="https://github.com/username/repo" required>
+                            <input type="text" id="githubBranch" placeholder="Branch (optional)" value="main">
+                        </div>
+                        <textarea id="vibeStatement" placeholder="What would you like to build? Be specific..."></textarea>
+                        <button id="generateContextBtn" class="primary-btn">Generate Context</button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Copy to AI Planner -->
+                <div class="step-card hidden" id="step2">
+                    <div class="step-header">
                         <span class="step-number">2</span>
-                        <span class="step-label">Setup</span>
+                        <h3>Copy to Gemini Planner</h3>
                     </div>
-                    <div class="step" data-step="3">
+                    <div class="step-content">
+                        <div class="output-preview" id="sectionAOutput"></div>
+                        <button class="copy-btn" onclick="copyToClipboard('sectionAOutput')">Copy to Clipboard</button>
+                        <button class="next-btn" onclick="moveToStep3()">Next Step</button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Paste AI Plan -->
+                <div class="step-card hidden" id="step3">
+                    <div class="step-header">
                         <span class="step-number">3</span>
-                        <span class="step-label">Plan</span>
+                        <h3>Paste AI Plan</h3>
                     </div>
-                    <div class="step" data-step="4">
+                    <div class="step-content">
+                        <textarea id="plannerOutput" placeholder="Paste Gemini's plan here..."></textarea>
+                        <button id="generateCoderContextBtn" class="primary-btn">Generate Coder Context</button>
+                    </div>
+                </div>
+
+                <!-- Step 4: Copy to Claude -->
+                <div class="step-card hidden" id="step4">
+                    <div class="step-header">
                         <span class="step-number">4</span>
-                        <span class="step-label">Code</span>
+                        <h3>Copy to Claude Coder</h3>
                     </div>
-                    <div class="step" data-step="5">
-                        <span class="step-number">5</span>
-                        <span class="step-label">Loop</span>
-                    </div>
-                </div>
-
-                <!-- Step 1: Feature Vibe -->
-                <div class="wizard-content" data-step="1">
-                    <h3>Describe Your Feature</h3>
-                    
-                    <!-- Repository Selection -->
-                    <div class="repo-selection-section">
-                        <h4>Target Repository</h4>
-                        <div class="github-repo-config">
-                            <label for="githubUrlInputRepo">GitHub Repository URL:</label>
-                            <input type="text" id="githubUrlInputRepo" placeholder="https://github.com/username/repo" class="repo-input" required>
-                            
-                            <label for="githubBranch">Branch (optional):</label>
-                            <input type="text" id="githubBranch" placeholder="main" class="repo-input">
-                            <p class="help-text">Leave blank to use the default branch</p>
+                    <div class="step-content">
+                        <div class="output-preview" id="sectionBOutput"></div>
+                        <button class="copy-btn" onclick="copyToClipboard('sectionBOutput')">Copy to Clipboard</button>
+                        <div class="iteration-controls">
+                            <button class="iterate-btn" onclick="startIteration()">Start Iteration</button>
                         </div>
                     </div>
-                    
-                    <div class="feature-vibe-section">
-                        <label for="featureVibe">What feature do you want to implement?</label>
-                        <textarea id="featureVibe" placeholder="e.g., Add Google OAuth login with user profile sync" rows="4"></textarea>
-                        <span class="char-count">0 characters</span>
-                        <p class="help-text">Be specific about what you want to build. This description will guide both Gemini and Claude throughout the development loop.</p>
-                    </div>
-                    <div class="prompt-refiner">
-                        <button class="refine-btn" onclick="refineVibe()">
-                            <span class="material-symbols-outlined">auto_awesome</span>
-                            Refine with AI
-                        </button>
-                        <div id="refinedVibe" class="refined-vibe hidden"></div>
-                    </div>
-                    <button class="next-btn">Next →</button>
-                </div>
-                
-                <!-- Step 2: Test Configuration -->
-                <div class="wizard-content hidden" data-step="2">
-                    <h3>Test Configuration</h3>
-                    
-                    <!-- Test Command -->
-                    <div class="test-section">
-                        <label for="testCommand">Test Command:</label>
-                        <input type="text" id="testCommand" placeholder="npm test, pytest, go test, etc." class="test-input">
-                        <p class="help-text">Command to run your test suite (will be used for automated testing during the loop)</p>
-                    </div>
-                    
-                    <!-- Docker Integration -->
-                    <div class="docker-section">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="useDocker">
-                            <span>Use Docker Compose for testing</span>
-                        </label>
-                        <div id="dockerConfig" class="docker-config hidden">
-                            <p class="help-text">Docker Compose will be automatically detected from your repository</p>
-                            <div class="docker-services-section hidden">
-                                <label>Available Services:</label>
-                                <div id="dockerServices" class="service-list"></div>
-                                <label for="dockerTestService">Service to run tests in:</label>
-                                <select id="dockerTestService" class="docker-select">
-                                    <option value="">Select a service</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <button class="prev-btn">← Back</button>
-                    <button class="next-btn">Next →</button>
                 </div>
 
-                <!-- Step 3: Initial Planning -->
-                <div class="wizard-content hidden" data-step="3">
-                    <h3>Planning Phase</h3>
-                    <p>We'll generate initial context for your AI Planner (Gemini).</p>
-                    <button class="prev-btn">← Back</button>
-                    <button class="generate-context-btn btn">Generate Planning Context</button>
-                </div>
-
-                <!-- Step 4: Coding Phase -->
-                <div class="wizard-content hidden" data-step="4">
-                    <h3>Upload Gemini's Plan</h3>
-                    <div class="planner-input">
-                        <label>AI Planner Output</label>
-                        <div class="input-choice">
-                            <button class="choice-btn active" data-choice="paste">Paste Text</button>
-                            <button class="choice-btn" data-choice="file">Upload File</button>
-                        </div>
-                        <textarea id="plannerText" placeholder="Paste your AI Planner output here"></textarea>
-                        <input type="file" id="plannerFile" class="hidden">
+                <!-- Iteration Step (optional) -->
+                <div class="step-card hidden" id="stepIteration">
+                    <div class="step-header">
+                        <span class="step-number">🔄</span>
+                        <h3>Iteration</h3>
                     </div>
-                    <button class="prev-btn">← Back</button>
-                    <button class="generate-coding-btn btn">Generate Coding Context</button>
-                </div>
-
-                <!-- Step 5: Loop Active -->
-                <div class="wizard-content hidden" data-step="5">
-                    <h3>Development Loop Active</h3>
-                    <div class="loop-info">
-                        <p>The development loop is now active. As you work with Claude and make commits, we'll automatically:</p>
-                        <ul>
-                            <li>Watch for new commits in your repository</li>
-                            <li>Analyze diffs and test results</li>
-                            <li>Generate iteration briefs for Gemini</li>
-                            <li>Maintain context between planning and coding phases</li>
-                        </ul>
-                        <div class="loop-controls">
-                            <button id="startLoop" class="btn">Start Loop</button>
-                            <button id="pauseLoop" class="btn pause hidden">Pause Loop</button>
-                            <button id="stopLoop" class="btn stop hidden">Stop Loop</button>
-                            <button id="nextIteration" class="btn">Manual Iteration</button>
-                            <button class="mark-feature-done btn">Mark Feature Complete</button>
-                        </div>
-                        <div id="diffSummary" class="hidden"></div>
+                    <div class="step-content">
+                        <textarea id="feedbackText" placeholder="Paste feedback or issues..."></textarea>
+                        <button id="generateIterationBtn" class="primary-btn">Generate Update</button>
                     </div>
                 </div>
+            </div>
 
-            </section>
-
-            <!-- Classic Mode (Hidden by default) -->
-            <section id="classic-workflow" class="workflow-section hidden">
-                <!-- Original repo2file UI content here -->
-            </section>
-
-            <!-- Progress Overlay -->
-            <div id="progressOverlay" class="progress-overlay hidden">
+            <!-- Progress indicator -->
+            <div class="progress-overlay hidden" id="progressOverlay">
                 <div class="progress-content">
                     <div class="spinner"></div>
-                    <h3>Processing Repository</h3>
-                    <p id="progressMessage">Scanning files...</p>
-                    <div class="progress-bar">
-                        <div class="progress-fill"></div>
-                    </div>
-                    <p id="progressStats">0 files scanned</p>
+                    <p id="progressMessage">Processing...</p>
                 </div>
             </div>
-
-            <!-- Results Section -->
-            <section id="results" class="results-section hidden">
-                <h2>Results</h2>
-                <nav class="result-tabs">
-                    <button class="tab-btn active" data-tab="copy">Copy Section</button>
-                    <button class="tab-btn" data-tab="manifest">File Explorer</button>
-                    <button class="tab-btn" data-tab="iteration">Iteration</button>
-                    <button class="tab-btn" data-tab="logs">Container Logs</button>
-                    <button class="tab-btn" data-tab="stats">Statistics</button>
-                    <button class="tab-btn" data-tab="rules">Project Rules</button>
-                </nav>
-
-                <div class="result-content" id="copy">
-                    <div class="copy-header">
-                        <h3>Content for AI</h3>
-                        <button class="copy-btn">Copy All</button>
-                    </div>
-                    <pre id="copyContent"></pre>
-                </div>
-
-                <div class="result-content hidden" id="manifest">
-                    <div class="file-explorer">
-                        <div class="file-tree"></div>
-                        <div class="file-preview"></div>
-                    </div>
-                </div>
-
-                <div class="result-content hidden" id="iteration">
-                    <div class="iteration-header">
-                        <h3>Iteration Brief (Section C)</h3>
-                        <button class="copy-iteration-btn btn">Copy for Gemini</button>
-                    </div>
-                    <div class="iteration-content">
-                        <div class="iteration-status">
-                            <span class="status-label">Status:</span>
-                            <span id="iterationStatus">Waiting for commits...</span>
-                        </div>
-                        <pre id="iterationBrief"></pre>
-                    </div>
-                </div>
-
-                <div class="result-content hidden" id="logs">
-                    <div class="log-controls">
-                        <select id="serviceSelector">
-                            <option>Select Service</option>
-                        </select>
-                        <button class="refresh-logs">Refresh</button>
-                    </div>
-                    <div class="log-viewer">
-                        <pre id="logContent"></pre>
-                    </div>
-                </div>
-
-                <div class="result-content hidden" id="stats">
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <h4>Files Processed</h4>
-                            <p id="filesCount">0</p>
-                        </div>
-                        <div class="stat-card">
-                            <h4>Tokens Used</h4>
-                            <p id="tokensUsed">0</p>
-                        </div>
-                        <div class="stat-card">
-                            <h4>Files Skipped</h4>
-                            <p id="filesSkipped">0</p>
-                        </div>
-                    </div>
-                    <div class="skip-report">
-                        <h4>Skipped Files</h4>
-                        <ul id="skipList"></ul>
-                    </div>
-                </div>
-
-                <div class="result-content hidden" id="rules">
-                    <div class="rules-management">
-                        <div class="rules-header">
-                            <h3>Project Rules & Guidelines</h3>
-                            <button class="import-rule-btn" onclick="showRuleTemplates()">
-                                <span class="material-symbols-outlined">add_circle</span>
-                                Import Template
-                            </button>
-                        </div>
-                        <div class="rules-list" id="rulesList">
-                            <!-- Rule files will be loaded here -->
-                        </div>
-                        <div class="selected-rules">
-                            <h4>Selected Rules for AI Context</h4>
-                            <p class="help-text">Selected rules will be included in Section B (Coder Context)</p>
-                            <div id="selectedRulesList"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <button class="new-analysis">Start New Analysis</button>
-            </section>
         </main>
-
-        <footer>
-            <p>&copy; 2025 BetterRepo2File. Vibe Coder Edition.</p>
-        </footer>
     </div>
 
-    <!-- Vibe Guide Drawer -->
-    <div id="vibeGuideDrawer" class="vibe-guide-drawer">
-        <div class="drawer-header">
-            <h3>ℹ️ Vibe Guide</h3>
-            <button class="drawer-close" onclick="toggleVibeGuide()">✕</button>
-        </div>
-        <div class="drawer-content">
-            <div class="tips-container" id="tipsContainer">
-                <!-- Tips will be dynamically loaded here -->
-            </div>
-        </div>
-    </div>
-
-    <!-- Vibe Guide Toggle Button -->
-    <button class="vibe-guide-toggle" onclick="toggleVibeGuide()">
-        <span class="material-symbols-outlined">info</span>
-        <span>Vibe Guide</span>
-    </button>
-
-    <script src="{{ url_for('static', filename='js/unified.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/loop.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/vibe-guide.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/rules-manager.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
 </html>

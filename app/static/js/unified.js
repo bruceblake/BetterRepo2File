@@ -118,6 +118,31 @@ class VibeCoderApp {
             });
         }
         
+        // GitHub URL input
+        const githubUrlInput = document.getElementById('githubUrlInputRepo');
+        if (githubUrlInput) {
+            githubUrlInput.addEventListener('input', (e) => {
+                this.state.repoUrl = e.target.value.trim();
+                console.log('GitHub URL updated:', this.state.repoUrl);
+                
+                // Clear refined vibe when repository changes
+                this.state.refinedVibe = '';
+                const refinedDiv = document.getElementById('refinedVibe');
+                if (refinedDiv) {
+                    refinedDiv.classList.add('hidden');
+                }
+            });
+        }
+        
+        // GitHub branch input
+        const githubBranchInput = document.getElementById('githubBranch');
+        if (githubBranchInput) {
+            githubBranchInput.addEventListener('input', (e) => {
+                this.state.repoBranch = e.target.value.trim();
+                console.log('GitHub branch updated:', this.state.repoBranch);
+            });
+        }
+        
         // Vibe statement
         const vibeTextarea = document.getElementById('featureVibe');
         if (vibeTextarea) {
@@ -127,23 +152,19 @@ class VibeCoderApp {
                 if (charCount) {
                     charCount.textContent = `${e.target.value.length} characters`;
                 }
+                
+                // Clear refined vibe when vibe changes significantly
+                if (this.state.refinedVibe && 
+                    !this.state.vibe.includes(this.state.refinedVibe.substring(0, 50))) {
+                    this.state.refinedVibe = '';
+                    const refinedDiv = document.getElementById('refinedVibe');
+                    if (refinedDiv) {
+                        refinedDiv.classList.add('hidden');
+                    }
+                }
             });
         }
         
-        // Repository inputs
-        const githubUrlInput = document.getElementById('githubUrlInputRepo');
-        if (githubUrlInput) {
-            githubUrlInput.addEventListener('input', (e) => {
-                this.state.repoUrl = e.target.value;
-            });
-        }
-        
-        const githubBranchInput = document.getElementById('githubBranch');
-        if (githubBranchInput) {
-            githubBranchInput.addEventListener('input', (e) => {
-                this.state.repoBranch = e.target.value;
-            });
-        }
         
         // Stage selection
         document.querySelectorAll('.stage-card').forEach(card => {
@@ -354,6 +375,17 @@ class VibeCoderApp {
     validateCurrentStep() {
         switch (this.currentStep) {
             case 1:
+                // Capture GitHub repository URL and branch
+                const githubUrlInput = document.getElementById('githubUrlInputRepo');
+                const githubBranchInput = document.getElementById('githubBranch');
+                
+                if (githubUrlInput) {
+                    this.state.repoUrl = githubUrlInput.value.trim();
+                }
+                if (githubBranchInput && githubBranchInput.value.trim()) {
+                    this.state.repoBranch = githubBranchInput.value.trim();
+                }
+                
                 // Validate feature vibe and repository selection
                 if (!this.state.vibe) {
                     alert('Please describe your feature/goal');
@@ -425,10 +457,19 @@ class VibeCoderApp {
         }
         
         // If we just moved to step 4, populate the planner output
-        if (this.currentStep === 4 && this.state.plannerOutput) {
-            const plannerText = document.getElementById('plannerText');
-            if (plannerText) {
-                plannerText.value = this.state.plannerOutput;
+        if (this.currentStep === 4) {
+            console.log('At step 4, checking planner output');
+            if (this.state.plannerOutput) {
+                console.log('Has planner output, trying to populate textarea');
+                const plannerText = document.getElementById('plannerText');
+                if (plannerText) {
+                    plannerText.value = this.state.plannerOutput;
+                    console.log('Populated textarea with planner output');
+                } else {
+                    console.error('plannerText element not found!');
+                }
+            } else {
+                console.log('No planner output in state');
             }
         }
     }
@@ -469,6 +510,22 @@ class VibeCoderApp {
     async startAnalysis() {
         console.log('Starting analysis with state:', this.state);
         
+        // Validate vibe matches repository
+        if (this.state.repoUrl && this.state.vibe) {
+            const repoName = this.state.repoUrl.split('/').pop().replace('.git', '');
+            const owner = this.state.repoUrl.split('/').slice(-2)[0];
+            const fullRepoName = `${owner}/${repoName}`;
+            
+            // Check if vibe references a different repository
+            if ((this.state.vibe.includes('github.com') && !this.state.vibe.includes(this.state.repoUrl)) ||
+                (this.state.vibe.includes('MintWebsite') && !this.state.repoUrl.includes('MintWebsite'))) {
+                console.warn('Vibe statement appears to reference a different repository');
+                // Clear the vibe to force user to update it
+                alert('Your feature description appears to reference a different repository. Please update it to match your selected repository.');
+                return;
+            }
+        }
+        
         const formData = new FormData();
         
         // Add basic data
@@ -478,8 +535,13 @@ class VibeCoderApp {
         console.log('Sending request with stage:', this.state.stage);
         
         // Add repository information
+        console.log('Adding repository info - URL:', this.state.repoUrl, 'Branch:', this.state.repoBranch);
         formData.append('repo_type', 'github');
-        formData.append('repo_url', this.state.repoUrl);
+        if (this.state.repoUrl) {
+            formData.append('repo_url', this.state.repoUrl);
+        } else {
+            console.error('WARNING: No repository URL in state!');
+        }
         if (this.state.repoBranch) {
             formData.append('repo_branch', this.state.repoBranch);
         }
@@ -614,9 +676,11 @@ class VibeCoderApp {
     
     async fetchResults() {
         try {
+            console.log('Fetching results for job:', this.state.jobId);
             const response = await fetch(`/api/result/${this.state.jobId}`);
             const result = await response.json();
             
+            console.log('Fetched result:', result);
             this.hideProgress();
             this.showResults(result);
             
@@ -628,17 +692,25 @@ class VibeCoderApp {
     }
     
     showResults(result) {
+        console.log('showResults called with:', result);
+        console.log('Current stage:', this.state.stage, 'Current step:', this.currentStep);
+        
         if (this.state.stage === 'A' && this.currentStep === 3) {
             // For stage A (planning), advance to next step
+            console.log('Advancing to step 4 with Section A content');
+            
+            // Store the Section A content FIRST before updating UI
+            if (result.copy_text) {
+                this.state.plannerOutput = result.copy_text;
+                console.log('Stored planner output:', this.state.plannerOutput.substring(0, 100) + '...');
+            } else {
+                console.error('No copy_text in result!');
+            }
+            
             this.hideProgress();
             this.currentStep++;
             this.updateStepVisibility();
             this.updateStepIndicators();
-            
-            // Store the Section A content
-            if (result.copy_text) {
-                this.state.plannerOutput = result.copy_text;
-            }
             
             return;
         }
@@ -886,6 +958,15 @@ function useRefinedVibe() {
     vibeTextarea.value = window.vibeCoderApp.state.refinedVibe;
     window.vibeCoderApp.state.vibe = window.vibeCoderApp.state.refinedVibe;
     
+    // Clear any old repository references
+    if (window.vibeCoderApp.state.repoUrl) {
+        // Check if the refined vibe matches the current repository
+        const repoName = window.vibeCoderApp.state.repoUrl.split('/').pop().replace('.git', '');
+        if (!window.vibeCoderApp.state.refinedVibe.includes(repoName)) {
+            console.warn('Refined vibe may not match current repository');
+        }
+    }
+    
     // Update character count
     const charCount = document.querySelector('.char-count');
     if (charCount) {
@@ -905,3 +986,41 @@ document.addEventListener('DOMContentLoaded', () => {
     window.vibeCoderApp = new VibeCoderApp();
     window.unifiedState = window.vibeCoderApp.state; // Expose state for other components
 });
+
+// Clear all state and restart
+function clearAndRestart() {
+    if (confirm('This will clear all current progress and start fresh. Continue?')) {
+        // Clear local storage
+        localStorage.clear();
+        
+        // Clear session storage
+        sessionStorage.clear();
+        
+        // Clear any cached data
+        if (window.vibeCoderApp) {
+            window.vibeCoderApp.state = {
+                mode: 'vibe',
+                stage: 'A',
+                vibe: '',
+                refinedVibe: '',
+                repository: null,
+                repoUrl: '',
+                repoBranch: '',
+                repoType: 'github',
+                dockerEnabled: false,
+                dockerServices: [],
+                dockerComposeFile: null,
+                testCommand: '',
+                plannerOutput: '',
+                previousOutput: null,
+                feedbackLog: null,
+                jobId: null,
+                sessionId: null
+            };
+            window.vibeCoderApp.currentStep = 1;
+        }
+        
+        // Reload the page
+        window.location.reload();
+    }
+}

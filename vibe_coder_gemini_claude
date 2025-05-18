@@ -6,13 +6,11 @@ Copy and paste this section into your Planning AI.
 INITIAL FEATURE VIBE/GOAL:
 Refined prompt:
 
-The goal is to enhance the MintWebsite (https://github.com/bruceblake/MintWebsite) with a "Learn" feature.  This feature should be broken down into three key aspects:
+**Aspect 1: Define the FSM States and Transitions for BetterRepo2File:**  Based on the current functionality of `bruceblake/BetterRepo2File`, identify the key states a file processing operation should transition through.  These states should include, but are not limited to, initial state, fetching repository data, parsing data, processing data, writing output, and final state (success or failure).  For each state, clearly define the possible transitions to other states based on events (e.g., successful download, parsing error, file write failure).  Document these states and transitions using a state diagram or a table.
 
-1. **Content Identification & Organization:** Identify existing content within the MintWebsite repository suitable for a "Learn" section. This includes determining which files (e.g., blog posts, documentation, tutorials) should be included and how they should be categorized (e.g., by topic, skill level, or technology).  Provide a proposed directory structure and file organization for this new "Learn" section.  Consider the need for metadata (title, tags, description) for improved searchability and discoverability.
+**Aspect 2:  Implement the FSM in a Suitable Language and Framework:** Choose a suitable programming language and framework (consistent with the existing codebase of `bruceblake/BetterRepo2File`) to implement the defined Finite State Machine.  Consider using a dedicated state machine library if appropriate for maintainability and readability.  The implementation should be well-documented and include unit tests to ensure the correct transitions and handling of errors.
 
-2. **Presentation & User Interface:**  Design a user interface for the "Learn" section. This should include navigation, search functionality, and clear presentation of the identified content.  Propose mockups or wireframes illustrating the user experience.  Consider responsiveness across different screen sizes (desktop, mobile).  Specify any necessary UI libraries or frameworks to be used.
-
-3. **Integration with Existing Website:**  Detail the technical implementation plan for integrating the "Learn" section into the existing MintWebsite.  This includes specifying the necessary code changes, database modifications (if any), and API interactions.  Consider aspects like SEO optimization and potential impact on site performance.  Provide a high-level technical design document outlining the architecture and key components.
+**Aspect 3: Integrate the FSM into the BetterRepo2File Workflow:** Integrate the implemented FSM into the existing file processing workflow of `bruceblake/BetterRepo2File`.  This should involve modifying the existing code to utilize the FSM for managing the file processing lifecycle.  Ensure that the integration does not introduce regressions in existing functionality and that the FSM enhances the robustness and error handling of
 
 PROJECT SNAPSHOT & HIGH-LEVEL CONTEXT:
 - Primary Language: Not determined
