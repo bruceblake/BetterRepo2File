@@ -200,6 +200,9 @@ class WorkflowController {
     }
     
     showStep(stepNumber) {
+        console.log('ShowStep called with stepNumber:', stepNumber);
+        console.log('Current step before:', this.state.currentStep);
+        
         // Stop commit polling when leaving iteration step
         if (this.state.currentStep === 5 && stepNumber !== 5) {
             stopCommitPolling();
@@ -222,14 +225,19 @@ class WorkflowController {
             default: stepId = `step${stepNumber}`;
         }
         
+        console.log('Showing step with ID:', stepId);
         const step = document.getElementById(stepId);
         if (step) {
+            console.log('Step element found, removing hidden class');
             step.classList.remove('hidden');
+        } else {
+            console.log('Step element NOT found for ID:', stepId);
         }
         
         this.state.currentStep = stepNumber;
         this.updateProgressIndicator();
         this.saveState();
+        console.log('Current step after:', this.state.currentStep);
     }
     
     showProgress(message, title = 'Processing...', step = null) {
@@ -508,6 +516,9 @@ class WorkflowController {
     }
     
     displayResults(result) {
+        console.log('DisplayResults called with currentStep:', this.state.currentStep);
+        console.log('Result:', result);
+        
         if (this.state.currentStep === 1) {
             // Show Section A output for initial planning
             const output = document.getElementById('sectionAOutput');
@@ -536,11 +547,17 @@ class WorkflowController {
             }
         } else if (this.state.currentStep === 7) {
             // Show iteration coding output for Claude
+            console.log('Showing iteration coding output for step 7');
             const output = document.getElementById('iterationCoderOutput');
+            console.log('Output element:', output);
             if (output) {
+                console.log('Setting output text:', result.copy_text);
                 output.textContent = result.copy_text || 'No content generated';
             }
+            console.log('Calling showStep(8)');
             this.showStep(8);  // Go to iteration coding step
+        } else {
+            console.log('Unhandled currentStep:', this.state.currentStep);
         }
     }
     
