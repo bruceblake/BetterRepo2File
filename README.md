@@ -131,6 +131,39 @@ This application consists of:
 - Git (for cloning repositories)
 - Web browser with JavaScript enabled
 
+## Testing
+
+### Running Tests with Docker
+
+The project includes a comprehensive test suite that can be run using Docker:
+
+```bash
+# Run all tests
+docker-compose --profile test up --build
+
+# Run tests with coverage reports
+docker-compose run --rm test
+
+# View coverage reports
+open test_results/python_coverage/index.html
+open test_results/js_coverage/index.html
+```
+
+For detailed testing instructions, see [DOCKER_TESTING.md](DOCKER_TESTING.md).
+
+### Local Testing
+
+You can also run tests locally:
+
+```bash
+# Python tests
+python -m pytest tests/test_app.py -v
+python -m pytest tests/test_repo2file.py -v
+
+# JavaScript tests
+cd tests && npm install && npm test
+```
+
 ## License
 
 [MIT License](LICENSE)

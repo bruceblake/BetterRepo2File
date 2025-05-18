@@ -20,6 +20,16 @@ import queue
 import threading
 import git
 
+# Handle relative imports when running as module vs directly
+if __name__ == '__main__':
+    from logger import iteration_logger, log_iteration_start, log_step, log_error, log_metric, log_iteration_end
+    from diff_visualizer import diff_visualizer, get_file_diff, get_git_diff
+    from test_executor import test_executor, detect_test_framework, run_tests
+else:
+    from .logger import iteration_logger, log_iteration_start, log_step, log_error, log_metric, log_iteration_end
+    from .diff_visualizer import diff_visualizer, get_file_diff, get_git_diff
+    from .test_executor import test_executor, detect_test_framework, run_tests
+
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload size
@@ -74,8 +84,19 @@ def send_progress(job_id, phase, current=0, total=0):
 def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, previous_output, feedback_log, repo_type=None, repo_path_input=None, repo_url=None, repo_branch=None):
     """Process a job in the background"""
     print(f"Starting job {job_id} with stage {stage}, repo_url: {repo_url}, branch: {repo_branch}")
+    
+    # Start iteration logging
+    iteration_description = f"Stage {stage} - {repo_url or repo_path_input or 'unknown repo'}"
+    log_iteration_start(job_id, iteration_description)
+    
     try:
         send_progress(job_id, 'extracting', 0, 0)
+        log_step("Starting extraction phase", {
+            "stage": stage,
+            "repo_type": repo_type,
+            "repo_url": repo_url,
+            "repo_branch": repo_branch
+        })
         
         # Handle repository selection
         repo_path = None
@@ -85,11 +106,18 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
             repo_path = repo_path_input
             if not os.path.exists(repo_path):
                 raise Exception(f"Local repository path does not exist: {repo_path}")
+            log_step("Using local repository", {"path": repo_path})
                 
         elif repo_type == 'github' and repo_url:
             # Clone GitHub repository
             repo_path = os.path.join(job_folder, 'repo')
             print(f"Cloning GitHub repo: {repo_url} to {repo_path}")
+            log_step("Cloning GitHub repository", {
+                "url": repo_url,
+                "branch": repo_branch,
+                "destination": repo_path
+            })
+            
             try:
                 if repo_branch:
                     # Clone specific branch
@@ -101,8 +129,10 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
                     result = subprocess.run(['git', 'clone', repo_url, repo_path], 
                                   check=True, capture_output=True, text=True)
                 print(f"Clone successful: {result}")
+                log_step("Repository cloned successfully", {"stdout": result.stdout[:500]})
             except subprocess.CalledProcessError as e:
                 print(f"Clone failed: {e}")
+                log_error(f"Failed to clone repository", e)
                 raise Exception(f"Failed to clone repository: {e.stderr}")
                 
         elif repo_file:
@@ -308,12 +338,15 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
         # Send completed phase before ending
         print(f"Job {job_id} completed successfully, sending completed signal")
         send_progress(job_id, 'completed', 100, 100)
+        log_iteration_end('completed')
         
     except Exception as e:
         print(f"Job {job_id} failed with error: {str(e)}")
         jobs[job_id]['status'] = 'error'
         jobs[job_id]['error'] = str(e)
         send_progress(job_id, 'error', 0, 0)
+        log_error(f"Job {job_id} failed", e)
+        log_iteration_end('failed')
     
     finally:
         if job_id in job_queues:
@@ -1202,6 +1235,10 @@ def generate_iteration_brief():
 @app.route('/api/run-tests', methods=['POST'])
 def run_tests():
     """Run tests and parse results"""
+    # Start test execution logging
+    test_id = str(uuid.uuid4())
+    log_iteration_start(test_id, "Test Execution")
+    
     try:
         data = request.get_json()
         repo_path = data.get('repo_path', '.')
@@ -1210,6 +1247,12 @@ def run_tests():
         use_docker = data.get('use_docker', None)  # None = auto-detect
         
         print(f"Test runner - Initial repo_path: {repo_path}, session_id: {session_id}")
+        log_step("Test runner initialized", {
+            "repo_path": repo_path,
+            "session_id": session_id,
+            "framework": test_framework,
+            "use_docker": use_docker
+        })
         
         # Handle GitHub URL similar to get-commits
         if repo_path and repo_path.startswith('https://github.com'):
@@ -2271,6 +2314,143 @@ def import_rule_template():
         return jsonify({
             'success': True,
             'imported_as': template_filename
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# New logging and monitoring endpoints
+@app.route('/api/logs/stream')
+def stream_logs():
+    """Stream real-time logs using Server-Sent Events"""
+    def generate():
+        log_queue = queue.Queue()
+        iteration_logger.add_queue(log_queue)
+        
+        try:
+            while True:
+                if not log_queue.empty():
+                    log_entry = log_queue.get()
+                    yield f"data: {json.dumps(log_entry)}\n\n"
+                else:
+                    # Send heartbeat to keep connection alive
+                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                time.sleep(0.5)
+        except GeneratorExit:
+            iteration_logger.remove_queue(log_queue)
+    
+    return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/api/iterations/history')
+def get_iteration_history():
+    """Get iteration history and metrics"""
+    try:
+        logs = iteration_logger.get_session_logs()
+        return jsonify({
+            'success': True,
+            'iterations': logs['metrics'].get('iterations', []),
+            'current_iteration': iteration_logger.current_iteration,
+            'session_id': logs['session_id'],
+            'metrics': logs['metrics']
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/iterations/<iteration_id>/diff')
+def get_iteration_diff(iteration_id):
+    """Get code changes for a specific iteration"""
+    try:
+        # Get diff for the iteration
+        repo_path = request.args.get('repo_path', '.')
+        diff_visualizer.repo_path = Path(repo_path)
+        
+        # Get git diff for the iteration
+        diff_data = diff_visualizer.get_git_diff()
+        
+        return jsonify({
+            'success': True,
+            'diff': diff_data
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/test/detect')
+def detect_tests():
+    """Detect available test frameworks and test files"""
+    try:
+        repo_path = request.args.get('repo_path', '.')
+        test_executor.repo_path = Path(repo_path)
+        
+        frameworks = test_executor.detect_test_framework()
+        
+        return jsonify({
+            'success': True,
+            'frameworks': frameworks
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/test/run', methods=['POST'])
+def run_user_tests():
+    """Run user's tests with detailed output"""
+    try:
+        data = request.get_json()
+        repo_path = data.get('repo_path', '.')
+        framework = data.get('framework')
+        verbose = data.get('verbose', True)
+        use_docker = data.get('use_docker', False)
+        
+        test_executor.repo_path = Path(repo_path)
+        
+        if use_docker:
+            result = test_executor.run_docker_tests(data.get('docker_image'))
+        else:
+            result = test_executor.run_tests(framework, verbose)
+        
+        return jsonify({
+            'success': result.get('success', False),
+            'result': result
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/diff/file', methods=['POST'])
+def get_file_diff_api():
+    """Get diff between two versions of a file"""
+    try:
+        data = request.get_json()
+        file_path = data.get('file_path')
+        original_content = data.get('original_content', '')
+        modified_content = data.get('modified_content', '')
+        
+        diff_data = diff_visualizer.get_file_diff(file_path, original_content, modified_content)
+        
+        return jsonify({
+            'success': True,
+            'diff': diff_data
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/session/<session_id>/metrics')
+def get_session_metrics(session_id):
+    """Get detailed metrics for a session"""
+    try:
+        session = sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        metrics = {
+            'session_id': session_id,
+            'start_time': session.get('start_time'),
+            'iterations': session.get('iterations', []),
+            'current_state': session.get('current_state'),
+            'errors': session.get('errors', []),
+            'performance': session.get('performance', {})
+        }
+        
+        return jsonify({
+            'success': True,
+            'metrics': metrics
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500

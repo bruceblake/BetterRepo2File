@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BetterRepo2File - Vibe Coder Workflow</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-styles.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet">
 </head>
@@ -340,9 +341,73 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- Iteration Dashboard Button -->
+            <button class="dashboard-btn" onclick="toggleDashboard()">
+                <span class="material-symbols-outlined">dashboard</span>
+                Show Dashboard
+            </button>
+            
+            <!-- Iteration Dashboard Modal -->
+            <div class="modal hidden" id="dashboardModal">
+                <div class="modal-content dashboard-modal">
+                    <div class="modal-header">
+                        <h2>Iteration Dashboard</h2>
+                        <button class="modal-close" onclick="toggleDashboard()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="iterationDashboard"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Log Viewer -->
+            <div class="log-viewer-container hidden" id="logViewerContainer">
+                <div class="log-viewer-header">
+                    <h3>Live Logs</h3>
+                    <button class="log-toggle" onclick="toggleLogViewer()">
+                        <span class="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+                <div id="logViewer"></div>
+            </div>
+            
+            <!-- Log Viewer Toggle Button -->
+            <button class="log-viewer-btn" onclick="toggleLogViewer()">
+                <span class="material-symbols-outlined">terminal</span>
+                <span class="log-count" id="logCount">0</span>
+            </button>
         </main>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', filename='js/log-viewer.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/iteration-dashboard.js') }}"></script>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script>
+        // Initialize dashboard and log viewer
+        let logViewer, iterationDashboard;
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize log viewer
+            logViewer = new LogViewer('logViewer');
+            
+            // Initialize iteration dashboard
+            iterationDashboard = new IterationDashboard('iterationDashboard');
+        });
+        
+        function toggleDashboard() {
+            const modal = document.getElementById('dashboardModal');
+            modal.classList.toggle('hidden');
+            if (!modal.classList.contains('hidden')) {
+                iterationDashboard.loadIterationHistory();
+            }
+        }
+        
+        function toggleLogViewer() {
+            const container = document.getElementById('logViewerContainer');
+            container.classList.toggle('hidden');
+        }
+    </script>
 </body>
 </html>
