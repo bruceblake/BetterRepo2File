@@ -2427,17 +2427,27 @@ def stream_logs():
         
         try:
             while True:
-                if not log_queue.empty():
-                    log_entry = log_queue.get()
-                    yield f"data: {json.dumps(log_entry)}\n\n"
-                else:
-                    # Send heartbeat to keep connection alive
-                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-                time.sleep(0.5)
+                try:
+                    if not log_queue.empty():
+                        log_entry = log_queue.get()
+                        yield f"data: {json.dumps(log_entry)}\n\n"
+                    else:
+                        # Send heartbeat to keep connection alive
+                        yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                    time.sleep(0.5)
+                except Exception as e:
+                    print(f"Error in log streaming: {e}")
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
         except GeneratorExit:
             iteration_logger.remove_queue(log_queue)
+        finally:
+            iteration_logger.remove_queue(log_queue)
     
-    return Response(generate(), mimetype='text/event-stream')
+    response = Response(generate(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    response.headers['Connection'] = 'keep-alive'
+    return response
 
 @app.route('/api/iterations/history')
 def get_iteration_history():
