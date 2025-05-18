@@ -191,6 +191,53 @@ class IncrementalScanner:
         
         return any(file_path.endswith(ext) for ext in code_extensions)
     
+    def _is_binary_file(self, file_path: Path) -> bool:
+        """Check if a file is binary"""
+        try:
+            with open(file_path, 'rb') as f:
+                chunk = f.read(8192)
+                if b'\0' in chunk:
+                    return True
+                # Check for high percentage of non-printable characters
+                text_chars = bytearray({7,8,9,10,12,13,27} | set(range(0x20, 0x100)) - {0x7f})
+                nontext = len([b for b in chunk if b not in text_chars])
+                return nontext / len(chunk) > 0.30 if chunk else False
+        except:
+            return True
+    
+    def _detect_language(self, file_path: str) -> str:
+        """Detect the programming language from file extension"""
+        extension_map = {
+            '.py': 'python',
+            '.js': 'javascript',
+            '.jsx': 'javascript',
+            '.ts': 'typescript',
+            '.tsx': 'typescript',
+            '.java': 'java',
+            '.cpp': 'cpp',
+            '.hpp': 'cpp',
+            '.c': 'c',
+            '.h': 'c',
+            '.cs': 'csharp',
+            '.rb': 'ruby',
+            '.go': 'go',
+            '.rs': 'rust',
+            '.swift': 'swift',
+            '.kt': 'kotlin',
+            '.scala': 'scala',
+            '.php': 'php',
+            '.vue': 'vue',
+            '.dart': 'dart',
+            '.r': 'r',
+            '.m': 'objective-c',
+            '.mm': 'objective-cpp'
+        }
+        
+        for ext, lang in extension_map.items():
+            if file_path.endswith(ext):
+                return lang
+        return 'unknown'
+    
     def load_ast_cache(self) -> Dict:
         """Load cached ASTs from disk"""
         if self.ast_cache_file.exists():

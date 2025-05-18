@@ -68,7 +68,18 @@ class WorkflowController {
         
         document.getElementById('generateCoderContextBtn')?.addEventListener('click', () => this.generateCoderContext());
         document.getElementById('generateIterationBtn')?.addEventListener('click', () => this.generateIteration());
-        document.getElementById('refinePromptBtn')?.addEventListener('click', () => this.refinePrompt());
+        const refineBtn = document.getElementById('refinePromptBtn');
+        console.log('Refine button found:', refineBtn);
+        if (refineBtn) {
+            refineBtn.addEventListener('click', (e) => {
+                console.log('Refine button clicked');
+                e.preventDefault();
+                e.stopPropagation();
+                this.refinePrompt().catch(err => {
+                    console.error('Error in refinePrompt:', err);
+                });
+            });
+        }
         document.getElementById('generateCoderContextIterationBtn')?.addEventListener('click', () => this.generateIterationCoderContext());
         
         // Input listeners
@@ -631,10 +642,15 @@ class WorkflowController {
     }
     
     async refinePrompt() {
+        console.log('refinePrompt function called');
+        
         const vibeInput = document.getElementById('vibeStatement');
         const refineBtn = document.getElementById('refinePromptBtn');
         
-        if (!vibeInput.value.trim()) {
+        console.log('vibeInput:', vibeInput);
+        console.log('vibeStatement value:', vibeInput?.value);
+        
+        if (!vibeInput || !vibeInput.value.trim()) {
             alert('Please enter a feature description first');
             return;
         }
@@ -644,6 +660,11 @@ class WorkflowController {
         refineBtn.innerHTML = '<span class="material-symbols-outlined">pending</span> Refining...';
         
         try {
+            console.log('Sending refine request with:', {
+                prompt: vibeInput.value,
+                repo_url: this.state.repoUrl
+            });
+            
             const response = await fetch('/api/refine_prompt_v2', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -653,7 +674,16 @@ class WorkflowController {
                 })
             });
             
+            console.log('Response status:', response.status);
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Response error:', errorText);
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            }
+            
             const result = await response.json();
+            console.log('Response result:', result);
             
             if (result.success) {
                 // Show refined prompt section

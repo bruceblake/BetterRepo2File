@@ -717,11 +717,16 @@ class UltraFileScanner:
                 serialized[key] = []
                 for entity in value:
                     if hasattr(entity, '__dict__'):
-                        entity_dict = entity.__dict__.copy()
-                        # Convert set to list for JSON serialization
-                        if 'dependencies' in entity_dict and isinstance(entity_dict['dependencies'], set):
-                            entity_dict['dependencies'] = list(entity_dict['dependencies'])
-                        serialized[key].append(entity_dict)
+                        try:
+                            # Create a shallow copy of the dict to avoid iteration errors
+                            entity_dict = dict(entity.__dict__)
+                            # Convert set to list for JSON serialization
+                            if 'dependencies' in entity_dict and isinstance(entity_dict['dependencies'], set):
+                                entity_dict['dependencies'] = list(entity_dict['dependencies'])
+                            serialized[key].append(entity_dict)
+                        except Exception as e:
+                            # If dict iteration fails, try alternative serialization
+                            serialized[key].append(str(entity))
                     else:
                         serialized[key].append(entity)
             else:
@@ -1861,7 +1866,7 @@ class UltraRepo2File:
             header.append(f"Repository: {repo_path.name}")
             header.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
             header.append(f"Processing Model: {self.profile.model}")
-            header.append(f"Token Budget: {self.profile.token_budget:,}")
+            header.append(f"Token Budget: {self.token_manager.budget.total:,}")
             header.append("")
             header.append("## Project Overview")
             header.append(f"Type: {analysis['project_type']}")
