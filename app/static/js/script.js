@@ -200,6 +200,11 @@ class WorkflowController {
     }
     
     showStep(stepNumber) {
+        // Stop commit polling when leaving iteration step
+        if (this.state.currentStep === 5 && stepNumber !== 5) {
+            stopCommitPolling();
+        }
+        
         document.querySelectorAll('.step-card').forEach(card => {
             card.classList.add('hidden');
         });
@@ -821,8 +826,9 @@ function resetWorkflow() {
 
 // Commit History Functions
 async function viewCommits() {
-    const commitBtn = event.target;
-    commitBtn.disabled = true;
+    // If called from button click, event will exist
+    const commitBtn = event && event.target;
+    if (commitBtn) commitBtn.disabled = true;
     
     try {
         console.log('Fetching commits with:', {
@@ -861,7 +867,7 @@ async function viewCommits() {
             </div>`;
         }
     } finally {
-        commitBtn.disabled = false;
+        if (commitBtn) commitBtn.disabled = false;
     }
 }
 
@@ -931,12 +937,42 @@ function copyToClipboard(elementId, buttonElement) {
 }
 
 function startIteration() {
+    // Don't run if we're already on this step
+    if (window.workflow.state.currentStep === 5) {
+        return;
+    }
+    
     window.workflow.showStep(5);
     document.getElementById('stepIteration').classList.remove('hidden');
     
-    // Fetch latest diff if we have a commit SHA
-    if (window.workflow.state.lastCommitSha) {
-        fetchLatestDiff();
+    // First update commits to get the latest
+    viewCommits().then(() => {
+        // Then fetch latest diff if we have a commit SHA
+        if (window.workflow.state.lastCommitSha) {
+            fetchLatestDiff();
+        }
+    });
+    
+    // Start real-time commit monitoring
+    startCommitPolling();
+}
+
+// Poll for new commits every 10 seconds
+function startCommitPolling() {
+    if (window.commitPollingInterval) {
+        clearInterval(window.commitPollingInterval);
+    }
+    
+    window.commitPollingInterval = setInterval(async () => {
+        await viewCommits();
+    }, 10000); // 10 seconds
+}
+
+// Stop commit polling when leaving the iteration step
+function stopCommitPolling() {
+    if (window.commitPollingInterval) {
+        clearInterval(window.commitPollingInterval);
+        window.commitPollingInterval = null;
     }
 }
 

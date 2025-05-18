@@ -1877,16 +1877,41 @@ def get_diff():
         sha = data.get('sha')
         session_id = data.get('session_id')
         
+        print(f"get-diff: repo_path={repo_path}, sha={sha}, session_id={session_id}")
+        
         # Handle GitHub URL
         if repo_path and repo_path.startswith('https://github.com'):
             if session_id:
-                job_folder = os.path.join(app.config['UPLOAD_FOLDER'], f'job_{session_id}')
-                repo_path = os.path.join(job_folder, 'repo')
+                # Try multiple folder patterns
+                folders_to_check = [
+                    os.path.join(app.config['UPLOAD_FOLDER'], f'session_{session_id}'),
+                    os.path.join(app.config['UPLOAD_FOLDER'], f'session_{session_id}', 'repo'),
+                    os.path.join(app.config['UPLOAD_FOLDER'], f'job_{session_id}'),
+                    os.path.join(app.config['UPLOAD_FOLDER'], f'job_{session_id}', 'repo')
+                ]
+                
+                # Also check all job folders for matching session_id
+                for job_id, job_data in jobs.items():
+                    if job_data.get('session_id') == session_id:
+                        folders_to_check.append(os.path.join(app.config['UPLOAD_FOLDER'], f'job_{job_id}'))
+                        folders_to_check.append(os.path.join(app.config['UPLOAD_FOLDER'], f'job_{job_id}', 'repo'))
+                
+                # Check each folder for repo
+                for folder in folders_to_check:
+                    if os.path.exists(folder) and os.path.exists(os.path.join(folder, '.git')):
+                        repo_path = folder
+                        print(f"Found repo at: {repo_path}")
+                        break
+                else:
+                    print(f"Repository not found for session_id: {session_id}")
+                    print(f"Checked folders: {folders_to_check}")
+                    return jsonify({'error': 'Repository not found for session'}), 404
             else:
                 return jsonify({'error': 'Session ID required for GitHub repos'}), 400
         
         if not os.path.exists(repo_path):
-            return jsonify({'error': 'Repository not found'}), 404
+            print(f"Repository path does not exist: {repo_path}")
+            return jsonify({'error': f'Repository not found at {repo_path}'}), 404
             
         # Import git analyzer
         from git_analyzer import GitAnalyzer
