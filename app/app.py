@@ -6,22 +6,173 @@ import subprocess
 import shutil
 import time
 import atexit
+import json
 from pathlib import Path
 from werkzeug.utils import secure_filename
-from flask import Flask, request, render_template, jsonify, send_file, abort
+from flask import Flask, request, render_template, jsonify, send_file, abort, Response
+from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
+import queue
+import threading
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for React frontend
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload size
 app.config['UPLOAD_FOLDER'] = os.path.join(tempfile.gettempdir(), 'repo2file_uploads')
+app.config['JOBS_FOLDER'] = os.path.join(tempfile.gettempdir(), 'repo2file_jobs')
 app.config['REPO2FILE_PATH'] = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'repo2file', 'dump.py')
 app.config['REPO2FILE_SMART_PATH'] = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'repo2file', 'dump_smart.py')
 app.config['REPO2FILE_TOKEN_PATH'] = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'repo2file', 'dump_token_aware.py')
 app.config['REPO2FILE_ULTRA_PATH'] = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'repo2file', 'dump_ultra.py')
 app.config['EXCLUDE_FILE'] = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'repo2file', 'exclude.txt')
 
-# Ensure temporary upload directory exists
+# Ensure temporary directories exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['JOBS_FOLDER'], exist_ok=True)
+
+# Job storage
+jobs = {}
+job_queues = {}
+
+def send_progress(job_id, phase, current=0, total=0):
+    """Send progress update to the job queue"""
+    if job_id in job_queues:
+        jobs[job_id]['phase'] = phase
+        jobs[job_id]['current'] = current
+        jobs[job_id]['total'] = total
+        job_queues[job_id].put({
+            'phase': phase,
+            'current': current,
+            'total': total
+        })
+
+def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, previous_output, feedback_log):
+    """Process a job in the background"""
+    try:
+        send_progress(job_id, 'extracting', 0, 0)
+        
+        # Handle file uploads
+        repo_path = None
+        if repo_file:
+            if repo_file.filename.endswith('.zip'):
+                # Extract zip
+                zip_path = os.path.join(job_folder, 'repo.zip')
+                repo_file.save(zip_path)
+                
+                import zipfile
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(os.path.join(job_folder, 'repo'))
+                repo_path = os.path.join(job_folder, 'repo')
+            else:
+                # Save single file
+                repo_path = os.path.join(job_folder, 'repo')
+                os.makedirs(repo_path, exist_ok=True)
+                repo_file.save(os.path.join(repo_path, repo_file.filename))
+        
+        # Save other uploaded files
+        if previous_output:
+            previous_output.save(os.path.join(job_folder, 'previous_output.txt'))
+        if feedback_log:
+            feedback_log.save(os.path.join(job_folder, 'feedback.log'))
+        
+        send_progress(job_id, 'analyzing', 0, 0)
+        
+        # Build repo2file command based on stage
+        cmd = [sys.executable, app.config['REPO2FILE_ULTRA_PATH']]
+        cmd.extend(['--profile', 'vibe_coder_gemini_claude'])
+        cmd.extend(['--vibe', vibe])
+        cmd.extend(['--output', os.path.join(job_folder, 'output.txt')])
+        
+        if stage == 'B' and planner_output:
+            # Save planner output to file
+            planner_file = os.path.join(job_folder, 'planner_output.txt')
+            with open(planner_file, 'w') as f:
+                f.write(planner_output)
+            cmd.extend(['--planner', planner_file])
+        
+        elif stage == 'C':
+            if previous_output:
+                cmd.extend(['--iterate', os.path.join(job_folder, 'previous_output.txt')])
+            if feedback_log:
+                cmd.extend(['--feedback', os.path.join(job_folder, 'feedback.log')])
+        
+        cmd.append(repo_path or '.')
+        
+        # Run the analysis
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if process.returncode != 0:
+            raise Exception(f"Repo2File failed: {process.stderr}")
+        
+        send_progress(job_id, 'finalizing', 100, 100)
+        
+        # Read the output and parse sections
+        output_file = os.path.join(job_folder, 'output.txt')
+        with open(output_file, 'r') as f:
+            full_content = f.read()
+        
+        # Parse sections (simplified for now)
+        sections = {
+            'copy_text': extract_copy_section(full_content, stage),
+            'manifest_html': extract_manifest(full_content),
+            'skipped_md': extract_skipped_report(full_content),
+            'stats': extract_token_stats(full_content)
+        }
+        
+        # Update job result
+        jobs[job_id]['status'] = 'completed'
+        jobs[job_id]['result'] = sections
+        
+    except Exception as e:
+        jobs[job_id]['status'] = 'error'
+        jobs[job_id]['error'] = str(e)
+        send_progress(job_id, 'error', 0, 0)
+    
+    finally:
+        if job_id in job_queues:
+            job_queues[job_id].put('END')
+
+def extract_copy_section(content, stage):
+    """Extract the section that should be copied to AI"""
+    # Simple extraction for now - we'll refine this based on actual output format
+    if stage == 'A':
+        # Extract planning section
+        return content
+    elif stage == 'B':
+        # Extract coding section 
+        return content
+    else:
+        # Extract iteration section
+        return content
+
+def extract_manifest(content):
+    """Extract and format the manifest as HTML"""
+    # Simple extraction for now
+    return "<pre>" + content[:5000] + "</pre>"
+
+def extract_skipped_report(content):
+    """Extract the skipped files report"""
+    # Look for skip report section
+    if "SKIPPED FILES REPORT" in content:
+        start = content.find("SKIPPED FILES REPORT")
+        end = content.find("\n\n", start)
+        return content[start:end] if end > start else content[start:]
+    return "No files were skipped."
+
+def extract_token_stats(content):
+    """Extract token usage statistics"""
+    # Simple extraction for now
+    stats = {
+        'used': 0,
+        'budget': 2000000
+    }
+    
+    # Look for token stats
+    if "Token usage:" in content:
+        # Parse actual stats from output
+        pass
+    
+    return stats
 
 # Setup background cleanup job
 def cleanup_old_dirs():
@@ -43,6 +194,77 @@ atexit.register(lambda: scheduler.shutdown())
 @app.route('/')
 def index():
     return render_template('index.html')
+
+# New UI API endpoints
+@app.route('/api/analyze', methods=['POST'])
+def analyze():
+    """Start a new analysis job"""
+    job_id = str(uuid.uuid4())
+    job_queue = queue.Queue()
+    job_queues[job_id] = job_queue
+    
+    # Get form data
+    vibe = request.form.get('vibe', '')
+    stage = request.form.get('stage', 'A')
+    repo_file = request.files.get('repo_zip')
+    planner_output = request.form.get('planner_output', '')
+    previous_output = request.files.get('previous_output')
+    feedback_log = request.files.get('feedback_log')
+    
+    # Create job folder
+    job_folder = os.path.join(app.config['JOBS_FOLDER'], job_id)
+    os.makedirs(job_folder, exist_ok=True)
+    
+    # Initialize job status
+    jobs[job_id] = {
+        'status': 'processing',
+        'phase': 'initializing',
+        'current': 0,
+        'total': 0,
+        'error': None,
+        'result': None
+    }
+    
+    # Start processing in background thread
+    thread = threading.Thread(target=process_job, args=(job_id, job_folder, vibe, stage, repo_file, planner_output, previous_output, feedback_log))
+    thread.start()
+    
+    return jsonify({'job_id': job_id}), 200
+
+@app.route('/api/status/<job_id>')
+def status(job_id):
+    """Server-sent events for job progress"""
+    def generate():
+        if job_id not in job_queues:
+            yield f"data: {json.dumps({'error': 'Invalid job ID'})}\n\n"
+            return
+            
+        q = job_queues[job_id]
+        while True:
+            try:
+                event = q.get(timeout=30)  # 30 second timeout
+                if event == 'END':
+                    break
+                yield f"data: {json.dumps(event)}\n\n"
+            except queue.Empty:
+                yield f"data: {json.dumps({'keepalive': True})}\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/api/result/<job_id>')
+def result(job_id):
+    """Get the final result of a job"""
+    if job_id not in jobs:
+        return jsonify({'error': 'Invalid job ID'}), 404
+    
+    job = jobs[job_id]
+    if job['status'] == 'processing':
+        return jsonify({'error': 'Job still processing'}), 202
+    
+    if job['status'] == 'error':
+        return jsonify({'error': job['error']}), 500
+    
+    return jsonify(job['result']), 200
 
 @app.route('/process', methods=['POST'])
 def process():

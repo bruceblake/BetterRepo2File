@@ -36,6 +36,18 @@ def cli():
     pass
 
 @cli.command()
+@click.argument('path', type=click.Path(exists=True), required=False)
+@click.option('--non-interactive', is_flag=True, help='Skip interactive prompts')
+def wizard(path, non_interactive):
+    """Interactive workflow assistant for Vibe Coder workflow"""
+    if non_interactive:
+        console.print("[yellow]Non-interactive mode not yet implemented[/yellow]")
+        return
+    
+    from repo2file.wizard import run_workflow_wizard
+    run_workflow_wizard(path)
+
+@cli.command()
 @click.argument('path', type=click.Path(exists=True))
 @click.argument('output', type=click.Path())
 @click.option('--mode', type=click.Choice(['standard', 'smart', 'token', 'ultra']), 
