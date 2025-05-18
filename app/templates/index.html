@@ -5,157 +5,282 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Convert a repository or files to a single text file optimized for LLM prompts">
     <meta name="keywords" content="repo2file, repository converter, LLM, AI, code consolidation">
-    <title>Repo2File - Convert Repository to Single File</title>
+    <title>Repo2File - Vibe Coder Assistant</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet">
 </head>
 <body>
     <div class="container">
         <header role="banner">
-            <h1>Repo2File</h1>
-            <p>Convert a repository or files to a single text file for LLM prompts</p>
+            <h1>Repo2File <span class="badge">Vibe Coder Edition</span></h1>
+            <p>Your AI-powered workflow assistant for Gemini planning → Claude coding</p>
         </header>
 
-        <main class="input-section" role="main">
-            <nav class="tabs" role="tablist" aria-label="Input method selection">
-                <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="file-upload" data-tab="file-upload">File Upload</button>
-                <button class="tab-btn" role="tab" aria-selected="false" aria-controls="github-url" data-tab="github-url">GitHub URL</button>
-            </nav>
-
-            <div class="tab-content" id="file-upload" role="tabpanel" aria-labelledby="file-upload-tab">
-                <div class="drop-area" id="dropArea" role="region" aria-label="File drop zone">
-                    <div class="drop-message">
-                        <p>Drag & drop files or folders here</p>
-                        <p>or</p>
-                        <label for="fileInput" class="file-input-label">Choose Files</label>
-                        <input type="file" id="fileInput" multiple webkitdirectory directory hidden aria-describedby="file-input-help">
-                        <span id="file-input-help" class="sr-only">Select multiple files or folders from your computer</span>
+        <main role="main">
+            <!-- Workflow Mode Selection -->
+            <section class="workflow-mode">
+                <h2>Select Your Workflow</h2>
+                <div class="mode-cards">
+                    <div class="mode-card active" id="vibe-mode">
+                        <span class="icon">🚀</span>
+                        <h3>Vibe Coder Workflow</h3>
+                        <p>Guided 3-stage workflow for AI planning and coding</p>
                     </div>
-                    <div class="file-list" id="fileList" role="list" aria-label="Selected files"></div>
-                </div>
-            </div>
-
-            <div class="tab-content hidden" id="github-url" role="tabpanel" aria-labelledby="github-url-tab">
-                <div class="github-input">
-                    <label for="githubUrlInput" class="sr-only">GitHub repository URL</label>
-                    <input type="url" id="githubUrlInput" placeholder="Enter GitHub repository URL (e.g., https://github.com/username/repo)" aria-describedby="github-url-help">
-                    <span id="github-url-help" class="sr-only">Enter the full URL of a GitHub repository</span>
-                </div>
-                <div class="branch-input">
-                    <label for="branchInput">Branch (optional):</label>
-                    <input type="text" id="branchInput" placeholder="main" title="Leave empty to use the default branch" aria-describedby="branch-help">
-                    <span id="branch-help" class="sr-only">Specify a branch name or leave empty for the default branch</span>
-                </div>
-            </div>
-
-            <div class="additional-options">
-                <div class="profile-select">
-                    <label for="profileSelect">Processing Profile:</label>
-                    <select id="profileSelect">
-                        <option value="">Custom Configuration</option>
-                        <option value="frontend">Frontend Development</option>
-                        <option value="backend">Backend Development</option>
-                        <option value="datascience">Data Science</option>
-                        <option value="documentation">Documentation</option>
-                        <option value="mobile">Mobile Development</option>
-                        <option value="microservices">Microservices</option>
-                        <option value="gemini">Gemini 1.5 Pro (Large Context)</option>
-                    </select>
-                </div>
-                <div class="file-types">
-                    <label for="fileTypes">File types to include (space-separated, e.g., .py .js .tsx):</label>
-                    <input type="text" id="fileTypes" placeholder="Leave empty to include all files">
-                </div>
-                <div class="exclusion-options">
-                    <label class="checkbox-container">
-                        <input type="checkbox" id="useGitignore" checked>
-                        <span class="checkbox-text">Use .gitignore file if available (reduces output size)</span>
-                    </label>
-                </div>
-                <div class="smart-mode-options">
-                    <label class="checkbox-container">
-                        <input type="checkbox" id="smartMode" checked>
-                        <span class="checkbox-text">Use Smart Mode (AI-optimized output: auto-filter, truncate, detect binary files)</span>
-                    </label>
-                </div>
-                <div class="token-mode-options">
-                    <label class="checkbox-container">
-                        <input type="checkbox" id="tokenMode">
-                        <span class="checkbox-text">Use Token-Aware Mode (Ultra-optimized: 500K token budget, pathspec gitignore, priority-based)</span>
-                    </label>
-                </div>
-                <div class="ultra-mode-options">
-                    <label class="checkbox-container">
-                        <input type="checkbox" id="ultraMode">
-                        <span class="checkbox-text">Use Ultra Mode (Most advanced: exact token counting, semantic analysis, caching)</span>
-                    </label>
-                    <div class="ultra-settings hidden" id="ultraSettings">
-                        <div class="vibe-input">
-                            <label for="vibeStatement">My Vibe / Primary Goal / Problem I'm Solving:</label>
-                            <textarea id="vibeStatement" placeholder="Describe your high-level goal or the vibe you want to achieve (e.g., 'Improve checkout speed', 'Refactor authentication for better security', 'Add real-time notifications')" rows="3"></textarea>
-                            <small>This will be used to create a high-level context for your planning AI (e.g., Gemini 1.5 Pro).</small>
-                        </div>
-                        <div class="query-input">
-                            <label for="intendedQuery">Intended LLM Query/Task (Optional):</label>
-                            <textarea id="intendedQuery" placeholder="Describe what you plan to ask the LLM (e.g., 'Refactor authentication module', 'Add unit tests for payment service')" rows="3"></textarea>
-                            <small>This helps prioritize the most relevant files and code sections for your specific task.</small>
-                        </div>
-                        <div class="planner-output-input">
-                            <label for="plannerOutput">AI Planner Output (Optional):</label>
-                            <textarea id="plannerOutput" placeholder="Paste the output from your planning AI (e.g., Gemini's plan) here. This will be integrated into the context for your coding AI." rows="5"></textarea>
-                            <small>After getting a plan from Gemini, paste it here to create a super-context for Claude Code.</small>
-                        </div>
-                        <div class="model-select">
-                            <label for="llmModel">LLM Model:</label>
-                            <select id="llmModel">
-                                <option value="gpt-4" selected>GPT-4</option>
-                                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                                <option value="claude-3">Claude 3</option>
-                                <option value="llama">Llama</option>
-                                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                            </select>
-                        </div>
-                        <div class="budget-input">
-                            <label for="tokenBudget">Token Budget:</label>
-                            <input type="number" id="tokenBudget" value="500000" min="1000" max="2000000">
-                        </div>
+                    <div class="mode-card" id="classic-mode">
+                        <span class="icon">📄</span>
+                        <h3>Classic Repo2File</h3>
+                        <p>Traditional repo consolidation for any use case</p>
                     </div>
                 </div>
+            </section>
+
+            <!-- Vibe Coder Workflow -->
+            <section id="vibe-workflow" class="workflow-section">
+                <div class="wizard-steps">
+                    <div class="step active" data-step="1">
+                        <span class="step-number">1</span>
+                        <span class="step-label">Setup</span>
+                    </div>
+                    <div class="step" data-step="2">
+                        <span class="step-number">2</span>
+                        <span class="step-label">Stage</span>
+                    </div>
+                    <div class="step" data-step="3">
+                        <span class="step-number">3</span>
+                        <span class="step-label">Input</span>
+                    </div>
+                    <div class="step" data-step="4">
+                        <span class="step-number">4</span>
+                        <span class="step-label">Generate</span>
+                    </div>
+                </div>
+
+                <!-- Step 1: Setup -->
+                <div class="wizard-content" data-step="1">
+                    <h3>Repository Setup</h3>
+                    
+                    <!-- Docker Integration -->
+                    <div class="docker-section">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="useDocker">
+                            <span>Use Docker Compose (for local dev logs)</span>
+                        </label>
+                        <div id="dockerConfig" class="docker-config hidden">
+                            <input type="file" id="composeFile" accept=".yml,.yaml">
+                            <label for="composeFile">Select docker-compose.yml</label>
+                            <div id="dockerServices" class="service-list"></div>
+                        </div>
+                    </div>
+
+                    <!-- Repository Selection -->
+                    <div class="repo-selection">
+                        <nav class="tabs">
+                            <button class="tab-btn active" data-tab="repo-upload">Upload Repo</button>
+                            <button class="tab-btn" data-tab="repo-github">GitHub URL</button>
+                            <button class="tab-btn" data-tab="repo-local">Local Path</button>
+                        </nav>
+
+                        <div class="tab-content" id="repo-upload">
+                            <div class="drop-area" id="dropArea">
+                                <div class="drop-message">
+                                    <span class="material-symbols-outlined">cloud_upload</span>
+                                    <p>Drag & drop repository ZIP or folder</p>
+                                    <label for="fileInput" class="file-input-label">Choose Files</label>
+                                    <input type="file" id="fileInput" accept=".zip" hidden>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="tab-content hidden" id="repo-github">
+                            <input type="url" id="githubUrl" placeholder="https://github.com/username/repo">
+                            <input type="text" id="githubBranch" placeholder="Branch (optional)">
+                        </div>
+
+                        <div class="tab-content hidden" id="repo-local">
+                            <input type="text" id="localPath" placeholder="/path/to/your/repository">
+                            <button class="browse-btn">Browse</button>
+                        </div>
+                    </div>
+
+                    <!-- Vibe Statement -->
+                    <div class="vibe-input">
+                        <label for="vibeStatement">What's your vibe/goal?</label>
+                        <textarea id="vibeStatement" placeholder="e.g., Add dark mode toggle to settings page"></textarea>
+                        <span class="char-count">0 characters</span>
+                    </div>
+
+                    <button class="next-btn">Next →</button>
+                </div>
+
+                <!-- Step 2: Stage Selection -->
+                <div class="wizard-content hidden" data-step="2">
+                    <h3>Select Your Stage</h3>
+                    <div class="stage-cards">
+                        <div class="stage-card" data-stage="A">
+                            <span class="stage-icon">💡</span>
+                            <h4>Plan</h4>
+                            <p>Fresh start - Need context for AI Planner</p>
+                        </div>
+                        <div class="stage-card" data-stage="B">
+                            <span class="stage-icon">💻</span>
+                            <h4>Code</h4>
+                            <p>Have a plan from AI Planner</p>
+                        </div>
+                        <div class="stage-card" data-stage="C">
+                            <span class="stage-icon">🔄</span>
+                            <h4>Iterate</h4>
+                            <p>Have results from AI Coder</p>
+                        </div>
+                    </div>
+                    <button class="prev-btn">← Back</button>
+                    <button class="next-btn">Next →</button>
+                </div>
+
+                <!-- Step 3: Stage-specific Input -->
+                <div class="wizard-content hidden" data-step="3">
+                    <h3>Additional Input</h3>
+                    
+                    <!-- Stage B Input -->
+                    <div id="stage-b-input" class="stage-input hidden">
+                        <label>AI Planner Output</label>
+                        <div class="input-choice">
+                            <button class="choice-btn active" data-choice="paste">Paste Text</button>
+                            <button class="choice-btn" data-choice="file">Upload File</button>
+                        </div>
+                        <textarea id="plannerText" placeholder="Paste your AI Planner output here"></textarea>
+                        <input type="file" id="plannerFile" class="hidden">
+                    </div>
+
+                    <!-- Stage C Input -->
+                    <div id="stage-c-input" class="stage-input hidden">
+                        <div class="file-input-group">
+                            <label>Previous Output</label>
+                            <input type="file" id="previousOutput">
+                        </div>
+                        <div class="file-input-group">
+                            <label>Feedback Log</label>
+                            <input type="file" id="feedbackLog">
+                        </div>
+                    </div>
+
+                    <button class="prev-btn">← Back</button>
+                    <button class="next-btn">Next →</button>
+                </div>
+
+                <!-- Step 4: Generate -->
+                <div class="wizard-content hidden" data-step="4">
+                    <h3>Review & Generate</h3>
+                    <div class="review-summary">
+                        <div class="summary-item">
+                            <span class="label">Repository:</span>
+                            <span id="repoSummary">-</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="label">Vibe:</span>
+                            <span id="vibeSummary">-</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="label">Stage:</span>
+                            <span id="stageSummary">-</span>
+                        </div>
+                        <div class="summary-item" id="dockerSummary" class="hidden">
+                            <span class="label">Docker:</span>
+                            <span id="dockerServices">-</span>
+                        </div>
+                    </div>
+                    <button class="prev-btn">← Back</button>
+                    <button class="generate-btn">Generate Context</button>
+                </div>
+            </section>
+
+            <!-- Classic Mode (Hidden by default) -->
+            <section id="classic-workflow" class="workflow-section hidden">
+                <!-- Original repo2file UI content here -->
+            </section>
+
+            <!-- Progress Overlay -->
+            <div id="progressOverlay" class="progress-overlay hidden">
+                <div class="progress-content">
+                    <div class="spinner"></div>
+                    <h3>Processing Repository</h3>
+                    <p id="progressMessage">Scanning files...</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p id="progressStats">0 files scanned</p>
+                </div>
             </div>
 
-            <div class="process-btn-container">
-                <button id="processBtn" class="process-btn" aria-label="Generate output file">Generate</button>
-                <button id="previewBtn" class="preview-btn" aria-label="Preview first 10 files">Preview (First 10 Files)</button>
-            </div>
+            <!-- Results Section -->
+            <section id="results" class="results-section hidden">
+                <h2>Results</h2>
+                <nav class="result-tabs">
+                    <button class="tab-btn active" data-tab="copy">Copy Section</button>
+                    <button class="tab-btn" data-tab="manifest">File Explorer</button>
+                    <button class="tab-btn" data-tab="logs">Container Logs</button>
+                    <button class="tab-btn" data-tab="stats">Statistics</button>
+                </nav>
+
+                <div class="result-content" id="copy">
+                    <div class="copy-header">
+                        <h3>Content for AI</h3>
+                        <button class="copy-btn">Copy All</button>
+                    </div>
+                    <pre id="copyContent"></pre>
+                </div>
+
+                <div class="result-content hidden" id="manifest">
+                    <div class="file-explorer">
+                        <div class="file-tree"></div>
+                        <div class="file-preview"></div>
+                    </div>
+                </div>
+
+                <div class="result-content hidden" id="logs">
+                    <div class="log-controls">
+                        <select id="serviceSelector">
+                            <option>Select Service</option>
+                        </select>
+                        <button class="refresh-logs">Refresh</button>
+                    </div>
+                    <div class="log-viewer">
+                        <pre id="logContent"></pre>
+                    </div>
+                </div>
+
+                <div class="result-content hidden" id="stats">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <h4>Files Processed</h4>
+                            <p id="filesCount">0</p>
+                        </div>
+                        <div class="stat-card">
+                            <h4>Tokens Used</h4>
+                            <p id="tokensUsed">0</p>
+                        </div>
+                        <div class="stat-card">
+                            <h4>Files Skipped</h4>
+                            <p id="filesSkipped">0</p>
+                        </div>
+                    </div>
+                    <div class="skip-report">
+                        <h4>Skipped Files</h4>
+                        <ul id="skipList"></ul>
+                    </div>
+                </div>
+
+                <button class="new-analysis">Start New Analysis</button>
+            </section>
         </main>
 
-        <div class="loading-indicator hidden" id="loadingIndicator" role="status" aria-live="polite" aria-busy="true">
-            <div class="spinner" aria-hidden="true"></div>
-            <p>Processing... This may take a moment.</p>
-        </div>
-
-        <section class="output-section hidden" id="outputSection" aria-labelledby="output-heading">
-            <div class="output-header">
-                <h2 id="output-heading">Output</h2>
-                <div class="exclusion-info" id="exclusionInfo" role="status" aria-live="polite">
-                </div>
-                <div class="output-actions">
-                    <button id="copyBtn" class="action-btn" aria-label="Copy output to clipboard">Copy to Clipboard</button>
-                    <button id="downloadBtn" class="action-btn" aria-label="Download output as file">Download</button>
-                </div>
-            </div>
-            <div class="output-content">
-                <pre id="outputContent" role="textbox" aria-readonly="true" aria-label="Generated output content" tabindex="0"></pre>
-            </div>
-        </section>
-
-        <div class="error-message hidden" id="errorMessage" role="alert" aria-live="assertive">
-            <p id="errorText"></p>
-        </div>
+        <footer>
+            <p>&copy; 2025 BetterRepo2File. Vibe Coder Edition.</p>
+        </footer>
     </div>
 
-    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/unified.js') }}"></script>
 </body>
 </html>

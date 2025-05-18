@@ -525,6 +525,71 @@ try:
 except ImportError:
     pass  # Profiles module not available
 
+# Docker endpoints
+@app.route('/api/parse-compose', methods=['POST'])
+def parse_compose():
+    """Parse docker-compose file to extract services"""
+    try:
+        compose_file = request.files.get('compose_file')
+        if not compose_file:
+            return jsonify({'error': 'No compose file provided'}), 400
+        
+        # Save temporarily and parse
+        temp_path = os.path.join(tempfile.gettempdir(), 'temp_compose.yml')
+        compose_file.save(temp_path)
+        
+        from repo2file.compose_parser import ComposeParser
+        parser = ComposeParser(Path(temp_path))
+        config = parser.parse()
+        
+        services = list(config.services.keys())
+        
+        # Clean up
+        os.unlink(temp_path)
+        
+        return jsonify({'services': services})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/docker/logs/<service>')
+def docker_logs(service):
+    """Get logs from a Docker service"""
+    try:
+        # Run docker logs command
+        cmd = ['docker', 'logs', '--tail', '100', service]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        logs = result.stdout
+        if result.stderr:
+            logs += '\n--- STDERR ---\n' + result.stderr
+        
+        return jsonify({'logs': logs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/docker/exec', methods=['POST'])
+def docker_exec():
+    """Execute command in a Docker container"""
+    try:
+        data = request.get_json()
+        service = data.get('service')
+        command = data.get('command')
+        
+        if not service or not command:
+            return jsonify({'error': 'Service and command required'}), 400
+        
+        # Run docker exec command
+        cmd = ['docker', 'exec', service] + command.split()
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        return jsonify({
+            'stdout': result.stdout,
+            'stderr': result.stderr,
+            'returncode': result.returncode
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     print("Starting BetterRepo2File UI server...")
     print("Access the application at: http://localhost:5000")

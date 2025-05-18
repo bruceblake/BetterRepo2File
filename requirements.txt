@@ -8,3 +8,4 @@ tiktoken>=0.8.0
 numpy==1.26.4
 rich>=13.7.0
 click>=8.1.0
+PyYAML>=6.0
