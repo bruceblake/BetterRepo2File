@@ -1342,13 +1342,44 @@ def run_tests():
             if docker_available:
                 print(f"Docker is available: {docker_check.stdout.strip()}")
                 
-                # Check for existing Docker files in the repo
-                dockerfile_path = os.path.join(repo_path, 'Dockerfile')
-                compose_path = os.path.join(repo_path, 'docker-compose.yml')
-                compose_alt_path = os.path.join(repo_path, 'docker-compose.yaml')
+                # Check for existing Docker files in the repo and subdirectories
+                import glob
                 
-                has_dockerfile = os.path.exists(dockerfile_path)
-                has_compose = os.path.exists(compose_path) or os.path.exists(compose_alt_path)
+                # Search for Dockerfile in repo and subdirectories
+                dockerfile_patterns = [
+                    os.path.join(repo_path, 'Dockerfile'),
+                    os.path.join(repo_path, '**/Dockerfile'),
+                    os.path.join(repo_path, 'Dockerfile.*'),
+                    os.path.join(repo_path, '**/Dockerfile.*')
+                ]
+                
+                dockerfile_path = None
+                for pattern in dockerfile_patterns:
+                    matches = glob.glob(pattern, recursive=True)
+                    if matches:
+                        has_dockerfile = True
+                        dockerfile_path = matches[0]  # Use the first match
+                        print(f"Found Dockerfile(s): {matches}")
+                        break
+                
+                # Search for docker-compose files
+                compose_patterns = [
+                    os.path.join(repo_path, 'docker-compose.yml'),
+                    os.path.join(repo_path, 'docker-compose.yaml'),
+                    os.path.join(repo_path, '**/docker-compose.yml'),
+                    os.path.join(repo_path, '**/docker-compose.yaml'),
+                    os.path.join(repo_path, 'docker-compose.*.yml'),
+                    os.path.join(repo_path, 'docker-compose.*.yaml')
+                ]
+                
+                compose_file = None
+                for pattern in compose_patterns:
+                    matches = glob.glob(pattern, recursive=True)
+                    if matches:
+                        has_compose = True
+                        compose_file = matches[0]  # Use the first match
+                        print(f"Found docker-compose file(s): {matches}")
+                        break
                 
                 print(f"Dockerfile exists: {has_dockerfile}, docker-compose exists: {has_compose}")
         except Exception as e:
@@ -1364,36 +1395,45 @@ def run_tests():
             # Build and run tests in Docker
             try:
                 if has_compose:
-                    # Use docker-compose
-                    compose_file = 'docker-compose.yml' if os.path.exists(os.path.join(repo_path, 'docker-compose.yml')) else 'docker-compose.yaml'
+                    # Use docker-compose with the found file
+                    if not compose_file:
+                        # Fallback if compose_file wasn't set (shouldn't happen)
+                        compose_file = 'docker-compose.yml' if os.path.exists(os.path.join(repo_path, 'docker-compose.yml')) else 'docker-compose.yaml'
+                    
+                    # Get relative path for docker-compose command
+                    compose_file_rel = os.path.relpath(compose_file, repo_path)
                     
                     # Check if there's a test service
                     compose_check = subprocess.run(
-                        ['docker-compose', '-f', compose_file, 'config'],
+                        ['docker-compose', '-f', compose_file_rel, 'config'],
                         cwd=repo_path,
                         capture_output=True,
                         text=True
                     )
                     
                     # Run tests with docker-compose
-                    cmd = ['docker-compose', '-f', compose_file, 'run', '--rm', 'test']
+                    cmd = ['docker-compose', '-f', compose_file_rel, 'run', '--rm', 'test']
                     if 'test' not in compose_check.stdout:
                         # Try default service name or app
                         # Check if package.json exists before trying npm test
                         package_json_path = os.path.join(repo_path, 'package.json')
                         if os.path.exists(package_json_path):
-                            cmd = ['docker-compose', '-f', compose_file, 'run', '--rm', 'app', 'npm', 'test']
+                            cmd = ['docker-compose', '-f', compose_file_rel, 'run', '--rm', 'app', 'npm', 'test']
                         else:
                             # Try Python tests
-                            cmd = ['docker-compose', '-f', compose_file, 'run', '--rm', 'app', 'pytest']
+                            cmd = ['docker-compose', '-f', compose_file_rel, 'run', '--rm', 'app', 'pytest']
                     
                     result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, timeout=600)
                     
                 elif has_dockerfile:
-                    # Build Docker image
+                    # Build Docker image using the found Dockerfile
                     image_name = f"test-{uuid.uuid4().hex[:8]}"
-                    build_cmd = ['docker', 'build', '-t', image_name, '.']
-                    build_result = subprocess.run(build_cmd, cwd=repo_path, capture_output=True, text=True)
+                    dockerfile_dir = os.path.dirname(dockerfile_path)
+                    dockerfile_name = os.path.basename(dockerfile_path)
+                    
+                    # Change to the directory containing the Dockerfile
+                    build_cmd = ['docker', 'build', '-t', image_name, '-f', dockerfile_name, '.']
+                    build_result = subprocess.run(build_cmd, cwd=dockerfile_dir, capture_output=True, text=True)
                     
                     if build_result.returncode != 0:
                         return jsonify({'error': f'Docker build failed: {build_result.stderr}'}), 500

@@ -251,16 +251,19 @@ class TestExecutor:
             'error': f'No test command found for {framework}'
         }
     
-    def _execute_command(self, cmd: List[str], framework: str, env: dict = None) -> Dict:
+    def _execute_command(self, cmd: List[str], framework: str, env: dict = None, cwd: str = None) -> Dict:
         """Execute a test command and capture output"""
         self.logger.info(f"Executing: {' '.join(cmd)}")
+        
+        # Use provided cwd or default to repo_path
+        working_dir = cwd if cwd else self.repo_path
         
         try:
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=self.repo_path,
+                cwd=working_dir,
                 env=env or os.environ,
                 universal_newlines=True,
                 bufsize=1
@@ -367,12 +370,29 @@ class TestExecutor:
     def run_docker_tests(self, image: str = None) -> Dict:
         """Run tests inside Docker container"""
         if not image:
-            # Use docker-compose if available
-            compose_file = self.repo_path / 'docker-compose.yml'
-            if compose_file.exists():
-                return self._run_docker_compose_tests()
+            # Search for docker-compose files in repo and subdirectories
+            import glob
+            compose_patterns = [
+                str(self.repo_path / 'docker-compose.yml'),
+                str(self.repo_path / 'docker-compose.yaml'),
+                str(self.repo_path / '**/docker-compose.yml'),
+                str(self.repo_path / '**/docker-compose.yaml'),
+                str(self.repo_path / 'docker-compose.*.yml'),
+                str(self.repo_path / 'docker-compose.*.yaml')
+            ]
+            
+            compose_file = None
+            for pattern in compose_patterns:
+                matches = glob.glob(pattern, recursive=True)
+                if matches:
+                    compose_file = matches[0]
+                    self.logger.info(f"Found docker-compose file: {compose_file}")
+                    break
+            
+            if compose_file:
+                return self._run_docker_compose_tests(compose_file)
             else:
-                return {'error': 'No Docker image specified and no docker-compose.yml found'}
+                return {'error': 'No Docker image specified and no docker-compose file found'}
         
         # Run with specified image
         # First check what test framework is available
@@ -405,10 +425,18 @@ class TestExecutor:
             # Try common test commands
             return 'make test || npm test || pytest || go test ./... || cargo test'
     
-    def _run_docker_compose_tests(self) -> Dict:
+    def _run_docker_compose_tests(self, compose_file: str = None) -> Dict:
         """Run tests using docker-compose"""
-        cmd = ['docker-compose', '--profile', 'test', 'up', '--build', '--exit-code-from', 'test']
-        return self._execute_command(cmd, 'docker-compose')
+        if compose_file:
+            # Use the found compose file
+            compose_dir = os.path.dirname(compose_file)
+            compose_name = os.path.basename(compose_file)
+            cmd = ['docker-compose', '-f', compose_name, '--profile', 'test', 'up', '--build', '--exit-code-from', 'test']
+            return self._execute_command(cmd, 'docker-compose', cwd=compose_dir)
+        else:
+            # Fallback to default
+            cmd = ['docker-compose', '--profile', 'test', 'up', '--build', '--exit-code-from', 'test']
+            return self._execute_command(cmd, 'docker-compose')
 
 
 # Global test executor instance
