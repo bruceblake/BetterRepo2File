@@ -132,9 +132,13 @@ def process():
         
         # Add options based on version
         if use_ultra_mode:
-            cmd.extend(['--model', llm_model, '--budget', token_budget])
             if profile:
                 cmd.extend(['--profile', profile])
+            # Only add model and budget if they differ from profile defaults or no profile
+            if llm_model and (not profile or llm_model != 'gpt-4'):
+                cmd.extend(['--model', llm_model])
+            if token_budget != '500000':
+                cmd.extend(['--budget', token_budget])
         else:
             cmd.append(exclusion_file)  # Exclusion file (either .gitignore or default)
         
@@ -263,4 +267,6 @@ except ImportError:
     pass  # Profiles module not available
 
 if __name__ == '__main__':
+    print("Starting BetterRepo2File UI server...")
+    print("Access the application at: http://localhost:5000")
     app.run(debug=True, host='0.0.0.0', port=5000)

@@ -1340,30 +1340,20 @@ def main():
         model="gpt-4"
     )
     
+    # Process profile first
     i = 3
     while i < len(sys.argv):
         arg = sys.argv[i]
-        if arg == '--model' and i + 1 < len(sys.argv):
-            profile.model = sys.argv[i + 1]
-            i += 2
-        elif arg == '--budget' and i + 1 < len(sys.argv):
-            profile.token_budget = int(sys.argv[i + 1])
-            i += 2
-        elif arg == '--exclude' and i + 1 < len(sys.argv):
-            profile.exclude_patterns.append(sys.argv[i + 1])
-            i += 2
-        elif arg == '--boost' and i + 1 < len(sys.argv):
-            pattern, boost = sys.argv[i + 1].split(':')
-            profile.priority_boost[pattern] = float(boost)
-            i += 2
-        elif arg == '--profile' and i + 1 < len(sys.argv):
+        if arg == '--profile' and i + 1 < len(sys.argv):
             profile_name = sys.argv[i + 1]
+            print(f"Loading profile: {profile_name}")
             # Load from app/profiles.py
             sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             from app.profiles import DEFAULT_PROFILES
             if profile_name in DEFAULT_PROFILES:
                 app_profile = DEFAULT_PROFILES[profile_name]
                 # Convert app profile to dump_ultra profile
+                print(f"Profile model: {app_profile.model}")
                 profile = ProcessingProfile(
                     name=app_profile.name,
                     token_budget=app_profile.token_budget,
@@ -1381,6 +1371,32 @@ def main():
                 profile_path = Path(profile_name)
                 if profile_path.exists():
                     profile = ProcessingProfile.load(profile_path)
+            i += 2
+        else:
+            i += 1
+    
+    # Then process other arguments (which may override profile settings)
+    i = 3
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg == '--model' and i + 1 < len(sys.argv):
+            model_arg = sys.argv[i + 1]
+            print(f"Setting model from arg: '{model_arg}'")
+            if model_arg:  # Only set if not empty
+                profile.model = model_arg
+            i += 2
+        elif arg == '--budget' and i + 1 < len(sys.argv):
+            profile.token_budget = int(sys.argv[i + 1])
+            i += 2
+        elif arg == '--exclude' and i + 1 < len(sys.argv):
+            profile.exclude_patterns.append(sys.argv[i + 1])
+            i += 2
+        elif arg == '--boost' and i + 1 < len(sys.argv):
+            pattern, boost = sys.argv[i + 1].split(':')
+            profile.priority_boost[pattern] = float(boost)
+            i += 2
+        elif arg == '--profile':
+            # Skip - already processed in first pass
             i += 2
         elif arg == '--manifest':
             profile.generate_manifest = True
