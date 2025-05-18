@@ -155,7 +155,7 @@
                 <div class="step-card hidden" id="step4">
                     <div class="step-header">
                         <h3>Step 4: Code & Test</h3>
-                        <p>Copy context to Claude and implement your feature</p>
+                        <p>Implement with Claude, commit changes, and test</p>
                     </div>
                     <div class="step-content">
                         <div class="instruction-box">
@@ -164,13 +164,15 @@
                                 <li>Copy the context below</li>
                                 <li>Paste it into <a href="https://claude.ai" target="_blank">Claude</a></li>
                                 <li>Implement your feature with Claude's help</li>
-                                <li>Test your implementation</li>
+                                <li>Commit your changes to git</li>
+                                <li>Run tests to verify your implementation</li>
+                                <li>If tests fail or you need changes, click "Start Iteration"</li>
                             </ol>
                         </div>
                         
                         <div class="output-section">
                             <div class="output-header">
-                                <h4>Context for Claude</h4>
+                                <h4>Context for Claude (Initial Implementation)</h4>
                                 <button class="copy-btn" onclick="copyToClipboard('sectionBOutput', this)">Copy</button>
                             </div>
                             <div class="output-preview" id="sectionBOutput"></div>
@@ -232,10 +234,21 @@
                 <!-- Iteration Planning (Gemini) -->
                 <div class="step-card hidden" id="stepIterationPlanning">
                     <div class="step-header">
-                        <h3>Iteration Planning</h3>
-                        <p>Gemini will re-plan based on your feedback</p>
+                        <h3>Iteration Planning (Gemini)</h3>
+                        <p>Get updated plan from Gemini based on feedback</p>
                     </div>
                     <div class="step-content">
+                        <div class="instruction-box">
+                            <p><strong>Instructions:</strong></p>
+                            <ol>
+                                <li>Copy the context below</li>
+                                <li>Open <a href="https://ai.google.dev/gemini-api/docs" target="_blank">Gemini AI</a></li>
+                                <li>Paste the context and get an updated plan</li>
+                                <li>Copy Gemini's response and paste it below</li>
+                                <li>Click "Generate Claude Context"</li>
+                            </ol>
+                        </div>
+                        
                         <div class="output-section">
                             <div class="output-header">
                                 <h4>Context for Gemini (Iteration)</h4>
@@ -248,7 +261,7 @@
                         
                         <div class="form-group">
                             <label>Paste Gemini's Updated Planning Output</label>
-                            <textarea id="iterationPlannerInput" placeholder="Paste the Gemini planning output here..." rows="4"></textarea>
+                            <textarea id="iterationPlannerInput" placeholder="Paste the updated planning output from Gemini here..." rows="4"></textarea>
                         </div>
                         
                         <div class="action-buttons">
@@ -264,10 +277,21 @@
                 <!-- Iteration Coding (Claude) -->
                 <div class="step-card hidden" id="stepIterationCoding">
                     <div class="step-header">
-                        <h3>Iteration Coding</h3>
-                        <p>Claude will implement the updated plan</p>
+                        <h3>Iteration Coding (Claude)</h3>
+                        <p>Implement updated plan with Claude</p>
                     </div>
                     <div class="step-content">
+                        <div class="instruction-box">
+                            <p><strong>Instructions:</strong></p>
+                            <ol>
+                                <li>Copy the context below</li>
+                                <li>Paste it into <a href="https://claude.ai" target="_blank">Claude</a></li>
+                                <li>Implement the changes with Claude's help</li>
+                                <li>Commit your changes to git</li>
+                                <li>Return to Testing to verify the changes</li>
+                            </ol>
+                        </div>
+                        
                         <div class="output-section">
                             <div class="output-header">
                                 <h4>Context for Claude (Iteration)</h4>
