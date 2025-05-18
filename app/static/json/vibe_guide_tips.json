@@ -1,0 +1,128 @@
+[
+  {
+    "id": "tip-001",
+    "category": "planning",
+    "title": "Be Specific in Your Feature Vibe",
+    "content": "When describing a feature, include specific UI elements, data flows, and user actions. Instead of 'Add user profile', say 'Add user profile page with avatar upload, bio editor, and social links'.",
+    "external_link": null
+  },
+  {
+    "id": "tip-002",
+    "category": "planning",
+    "title": "Break Down Complex Features",
+    "content": "If your feature involves multiple systems (frontend, backend, database), consider breaking it into phases: 1) Data model & API, 2) Basic UI, 3) Advanced features.",
+    "external_link": null
+  },
+  {
+    "id": "tip-003",
+    "category": "planning",
+    "title": "Include Success Criteria",
+    "content": "Define what 'done' looks like. Example: 'Users can upload avatars up to 5MB, see a preview, and crop the image before saving.'",
+    "external_link": null
+  },
+  {
+    "id": "tip-004",
+    "category": "coding_setup",
+    "title": "Review Gemini's Plan First",
+    "content": "Before sending to Claude, review Gemini's plan for:\n- Missing edge cases\n- Security considerations\n- Performance implications\n- Testing requirements",
+    "external_link": null
+  },
+  {
+    "id": "tip-005",
+    "category": "coding_setup",
+    "title": "Provide Context Files",
+    "content": "If your feature touches existing code, explicitly mention the key files Claude should modify. This prevents unintended changes to unrelated code.",
+    "external_link": null
+  },
+  {
+    "id": "tip-006",
+    "category": "coding_setup",
+    "title": "Specify Code Style",
+    "content": "If you have preferences (async/await vs promises, class vs functional components), mention them explicitly in your instructions.",
+    "external_link": null
+  },
+  {
+    "id": "tip-007",
+    "category": "iteration_feedback",
+    "title": "Describe What Went Wrong",
+    "content": "When tests fail, provide specific error messages and scenarios. 'Login fails with 500 error when email contains special characters' is better than 'login broken'.",
+    "external_link": null
+  },
+  {
+    "id": "tip-008",
+    "category": "iteration_feedback",
+    "title": "Include User Feedback",
+    "content": "If you manually tested the feature, describe the UX issues you found. This helps Gemini plan better fixes.",
+    "external_link": null
+  },
+  {
+    "id": "tip-009",
+    "category": "iteration_feedback",
+    "title": "Highlight Performance Issues",
+    "content": "If you notice slow queries, unnecessary re-renders, or memory leaks, mention these explicitly in your iteration feedback.",
+    "external_link": null
+  },
+  {
+    "id": "tip-010",
+    "category": "general_ai_prompting",
+    "title": "Use Consistent Terminology",
+    "content": "Stick to the same names for components, variables, and concepts throughout the loop. This prevents confusion between planning and coding phases.",
+    "external_link": null
+  },
+  {
+    "id": "tip-011",
+    "category": "general_ai_prompting",
+    "title": "Provide Examples",
+    "content": "When describing desired behavior, include example inputs and expected outputs. This is especially helpful for data transformations and API responses.",
+    "external_link": null
+  },
+  {
+    "id": "tip-012",
+    "category": "general_ai_prompting",
+    "title": "Mention Dependencies",
+    "content": "If your feature requires new libraries or services, mention them upfront. This helps both Gemini and Claude plan appropriately.",
+    "external_link": "https://docs.npmjs.com/cli/v8/commands/npm-install"
+  },
+  {
+    "id": "tip-013",
+    "category": "planning",
+    "title": "Consider Mobile Responsiveness",
+    "content": "For UI features, explicitly state mobile requirements. Should it work on small screens? Touch gestures? Offline capabilities?",
+    "external_link": null
+  },
+  {
+    "id": "tip-014",
+    "category": "coding_setup",
+    "title": "Security First",
+    "content": "Always mention security requirements: authentication, authorization, input validation, XSS prevention, SQL injection protection.",
+    "external_link": "https://owasp.org/www-project-top-ten/"
+  },
+  {
+    "id": "tip-015",
+    "category": "iteration_feedback",
+    "title": "Check Browser Console",
+    "content": "Include browser console errors and network failures in your feedback. These often reveal issues not caught by tests.",
+    "external_link": null
+  },
+  {
+    "id": "tip-016",
+    "category": "general_ai_prompting",
+    "title": "State Assumptions",
+    "content": "List your assumptions about existing code, database schema, and API contracts. This helps AI avoid breaking changes.",
+    "external_link": null
+  },
+  {
+    "id": "tip-017",
+    "category": "planning",
+    "title": "Think About State Management",
+    "content": "For complex features, describe how state should be managed: local component state, global store, server state, or cache?",
+    "external_link": null
+  },
+  {
+    "id": "tip-018",
+    "category": "coding_setup",
+    "title": "Test Coverage Expectations",
+    "content": "Specify desired test coverage: unit tests, integration tests, E2E tests. Mention specific scenarios that must be tested.",
+    "external_link": null
+  }
+]

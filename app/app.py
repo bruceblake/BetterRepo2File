@@ -14,6 +14,7 @@ from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 import queue
 import threading
+import git
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
@@ -587,6 +588,271 @@ def docker_exec():
             'stderr': result.stderr,
             'returncode': result.returncode
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Commit watching endpoints
+@app.route('/api/watch-commits/start', methods=['POST'])
+def start_commit_watch():
+    """Start watching commits on the current repository"""
+    try:
+        data = request.get_json()
+        repo_path = data.get('repo_path', '.')
+        last_commit = data.get('last_commit')
+        
+        # Import here to avoid issues if gitpython not installed
+        from repo2file.git_diff_summarizer import CommitWatcher
+        
+        # Initialize commit watcher
+        watcher = CommitWatcher(Path(repo_path))
+        new_commits = watcher.get_commits_since(last_commit)
+        
+        return jsonify({
+            'success': True,
+            'commits': [
+                {
+                    'hash': str(commit),
+                    'message': commit.message.strip(),
+                    'author': str(commit.author),
+                    'timestamp': commit.committed_date
+                }
+                for commit in new_commits
+            ]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/analyze-diff', methods=['POST'])
+def analyze_diff():
+    """Analyze git diff for a commit"""
+    try:
+        data = request.get_json()
+        repo_path = data.get('repo_path', '.')
+        commit_hash = data.get('commit_hash')
+        
+        # Import here to avoid issues if gitpython not installed
+        from repo2file.git_diff_summarizer import GitDiffSummarizer
+        
+        # Initialize summarizer
+        summarizer = GitDiffSummarizer(Path(repo_path))
+        summary = summarizer.summarize_commit(commit_hash)
+        
+        return jsonify({
+            'success': True,
+            'summary': {
+                'files_changed': summary.files_changed,
+                'additions': summary.additions,
+                'deletions': summary.deletions,
+                'functions_modified': summary.functions_modified,
+                'test_paths': summary.test_paths,
+                'non_test_paths': summary.non_test_paths,
+                'summary_text': summary.summary_text,
+                'high_level_summary': summary.high_level_summary
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/generate-iteration-brief', methods=['POST'])
+def generate_iteration_brief():
+    """Generate iteration brief (Section C) from diff and test results"""
+    try:
+        data = request.get_json()
+        planner_output = data.get('planner_output', '')
+        diff_summary = data.get('diff_summary', {})
+        test_results = data.get('test_results', {})
+        feature_vibe = data.get('feature_vibe', '')
+        
+        # Construct the iteration brief
+        brief = f"## Feature Implementation Progress\n\n"
+        brief += f"**Feature Vibe**: {feature_vibe}\n\n"
+        
+        # Add planner context
+        if planner_output:
+            brief += "### Previous Planning Context\n"
+            brief += f"{planner_output[:500]}...\n\n"
+        
+        # Add diff summary
+        brief += "### Changes Made\n"
+        if diff_summary:
+            brief += f"- Files changed: {', '.join(diff_summary.get('files_changed', []))}\n"
+            brief += f"- Lines added: {diff_summary.get('additions', 0)}\n"
+            brief += f"- Lines deleted: {diff_summary.get('deletions', 0)}\n"
+            if diff_summary.get('functions_modified'):
+                brief += f"- Functions modified: {', '.join(diff_summary['functions_modified'])}\n"
+            brief += f"\n{diff_summary.get('high_level_summary', '')}\n\n"
+        
+        # Add test results
+        brief += "### Test Results\n"
+        if test_results:
+            if test_results.get('passed'):
+                brief += f"✅ Passed: {test_results['passed']}\n"
+            if test_results.get('failed'):
+                brief += f"❌ Failed: {test_results['failed']}\n"
+            if test_results.get('errors'):
+                brief += f"⚠️ Errors: {test_results['errors']}\n"
+            if test_results.get('failure_details'):
+                brief += "\nFailure Details:\n"
+                for failure in test_results['failure_details']:
+                    brief += f"- {failure}\n"
+        else:
+            brief += "No test results available.\n"
+        
+        # Add next steps
+        brief += "\n### Next Steps\n"
+        brief += "Please review the above changes and test results, then:\n"
+        brief += "1. Fix any failing tests or errors\n"
+        brief += "2. Complete any unfinished implementation\n"
+        brief += "3. Add any missing functionality\n"
+        brief += "4. Ensure all edge cases are handled\n"
+        
+        return jsonify({
+            'success': True,
+            'iteration_brief': brief
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/run-tests', methods=['POST'])
+def run_tests():
+    """Run tests and parse results"""
+    try:
+        data = request.get_json()
+        repo_path = data.get('repo_path', '.')
+        test_framework = data.get('framework', 'auto')  # auto-detect by default
+        
+        # Import test parser
+        from repo2file.git_diff_summarizer import TestResultParser
+        
+        results = {}
+        
+        # Run tests based on framework or auto-detect
+        if test_framework == 'auto':
+            # Try common test commands
+            test_commands = [
+                ('pytest', ['pytest', '--tb=short']),
+                ('npm', ['npm', 'test']),
+                ('yarn', ['yarn', 'test']),
+                ('make', ['make', 'test']),
+                ('go', ['go', 'test', './...']),
+                ('cargo', ['cargo', 'test']),
+                ('dotnet', ['dotnet', 'test'])
+            ]
+            
+            for framework, cmd in test_commands:
+                try:
+                    result = subprocess.run(cmd, 
+                                          capture_output=True, 
+                                          text=True,
+                                          cwd=repo_path,
+                                          timeout=300)  # 5 minute timeout
+                    
+                    if result.returncode != -1:  # Command exists
+                        parser = TestResultParser()
+                        test_result = parser.parse_output(result.stdout + result.stderr, framework)
+                        
+                        if test_result.total_tests > 0:  # Found actual tests
+                            results = {
+                                'framework': framework,
+                                'passed': test_result.passed,
+                                'failed': test_result.failed,
+                                'errors': test_result.errors,
+                                'skipped': test_result.skipped,
+                                'failure_details': test_result.failure_details,
+                                'raw_output': result.stdout + result.stderr
+                            }
+                            break
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    continue
+        else:
+            # Run specific framework
+            framework_commands = {
+                'pytest': ['pytest', '--tb=short'],
+                'jest': ['npm', 'test'],
+                'mocha': ['npm', 'test'],
+                'go': ['go', 'test', './...'],
+                'cargo': ['cargo', 'test'],
+                'dotnet': ['dotnet', 'test']
+            }
+            
+            cmd = framework_commands.get(test_framework)
+            if cmd:
+                result = subprocess.run(cmd,
+                                      capture_output=True,
+                                      text=True,
+                                      cwd=repo_path,
+                                      timeout=300)
+                
+                parser = TestResultParser()
+                test_result = parser.parse_output(result.stdout + result.stderr, test_framework)
+                
+                results = {
+                    'framework': test_framework,
+                    'passed': test_result.passed,
+                    'failed': test_result.failed,
+                    'errors': test_result.errors,
+                    'skipped': test_result.skipped,
+                    'failure_details': test_result.failure_details,
+                    'raw_output': result.stdout + result.stderr
+                }
+        
+        if not results:
+            return jsonify({'error': 'No test framework detected or tests found'}), 404
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/archive-feature', methods='POST']) 
+def archive_feature():
+    """Archive completed feature for future reference"""
+    try:
+        data = request.get_json()
+        feature_vibe = data.get('feature_vibe')
+        planner_outputs = data.get('planner_outputs', [])
+        commits = data.get('commits', [])
+        test_results = data.get('test_results', {})
+        
+        # Create archive directory
+        archive_dir = os.path.join(app.config['JOBS_FOLDER'], 'archives')
+        os.makedirs(archive_dir, exist_ok=True)
+        
+        # Generate archive ID
+        archive_id = f"{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        feature_dir = os.path.join(archive_dir, archive_id)
+        os.makedirs(feature_dir, exist_ok=True)
+        
+        # Save feature metadata
+        metadata = {
+            'id': archive_id,
+            'feature_vibe': feature_vibe,
+            'archived_at': time.time(),
+            'commits_count': len(commits),
+            'test_results': test_results
+        }
+        
+        with open(os.path.join(feature_dir, 'metadata.json'), 'w') as f:
+            json.dump(metadata, f, indent=2)
+        
+        # Save planner outputs
+        for i, output in enumerate(planner_outputs):
+            with open(os.path.join(feature_dir, f'planner_{i}.txt'), 'w') as f:
+                f.write(output)
+        
+        # Save commit history
+        with open(os.path.join(feature_dir, 'commits.json'), 'w') as f:
+            json.dump(commits, f, indent=2)
+        
+        return jsonify({
+            'success': True,
+            'archive_id': archive_id,
+            'path': feature_dir
+        })
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

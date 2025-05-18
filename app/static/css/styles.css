@@ -570,6 +570,140 @@ pre {
     color: var(--theme-text-secondary);
 }
 
+/* Loop Dashboard */
+.loop-dashboard {
+    background: var(--theme-bg-secondary);
+    border-radius: 1rem;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    border: 1px solid var(--theme-border-color);
+}
+
+.loop-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.status-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--theme-bg-tertiary);
+    border-radius: 2rem;
+    border: 2px solid var(--theme-border-color);
+    color: var(--theme-text-secondary);
+    transition: all 0.3s ease;
+}
+
+.status-chip.active {
+    border-color: var(--theme-accent-purple);
+    background: var(--theme-active-bg);
+    color: var(--theme-text-primary);
+}
+
+.status-arrow {
+    color: var(--theme-text-secondary);
+    font-size: 1.2rem;
+}
+
+.loop-actions {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    justify-content: center;
+}
+
+.loop-actions button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.commit-history {
+    background: var(--theme-bg-primary);
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.commit-history h4 {
+    margin-bottom: 1rem;
+    color: var(--theme-text-primary);
+}
+
+#commit-list {
+    list-style: none;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+#commit-list li {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--theme-border-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+#commit-list li:hover {
+    background: var(--theme-hover-bg);
+}
+
+.commit-sha {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    color: var(--theme-accent-purple);
+}
+
+.commit-message {
+    flex: 1;
+    color: var(--theme-text-primary);
+}
+
+.commit-status {
+    font-size: 1rem;
+}
+
+/* Feature Vibe Section */
+.feature-vibe-section {
+    margin-bottom: 2rem;
+}
+
+.feature-vibe-section textarea {
+    margin-top: 0.5rem;
+}
+
+.help-text {
+    margin-top: 0.5rem;
+    color: var(--theme-text-secondary);
+    font-size: 0.9rem;
+}
+
+/* Iteration Tab */
+.iteration-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.iteration-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    color: var(--theme-text-secondary);
+}
+
+.iteration-status .status-label {
+    font-weight: 500;
+}
+
 /* Footer */
 footer {
     text-align: center;
@@ -610,4 +744,273 @@ footer {
     .stats-grid {
         grid-template-columns: 1fr;
     }
+}
+
+/* Loop Dashboard Styles */
+.loop-dashboard {
+    background: var(--theme-bg-secondary);
+    border-radius: 1rem;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    border: 1px solid var(--theme-border-color);
+}
+
+.loop-status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.loop-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.loop-status {
+    padding: 0.5rem 1rem;
+    background: var(--theme-bg-tertiary);
+    border-radius: 2rem;
+    font-weight: 500;
+}
+
+.loop-status.running {
+    background: var(--theme-success-color);
+    color: white;
+}
+
+.loop-status.paused {
+    background: var(--theme-warning-color);
+    color: white;
+}
+
+.loop-status.stopped {
+    background: var(--theme-text-tertiary);
+    color: var(--theme-text-primary);
+}
+
+.iteration-count {
+    color: var(--theme-text-secondary);
+    font-weight: 500;
+}
+
+.status-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--theme-bg-tertiary);
+    border-radius: 2rem;
+    opacity: 0.5;
+    transition: all 0.3s ease;
+}
+
+.status-chip.active {
+    background: var(--theme-accent-purple);
+    opacity: 1;
+    transform: scale(1.05);
+}
+
+.status-icon {
+    font-size: 1.2rem;
+}
+
+.status-arrow {
+    color: var(--theme-text-tertiary);
+    font-size: 1.2rem;
+}
+
+.loop-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-bottom: 2rem;
+}
+
+.loop-actions button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    background: var(--theme-bg-tertiary);
+    border: 1px solid var(--theme-border-color);
+    border-radius: 0.5rem;
+    color: var(--theme-text-primary);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.loop-actions button:hover {
+    background: var(--theme-hover-bg);
+    border-color: var(--theme-accent-purple);
+}
+
+.commit-history {
+    background: var(--theme-bg-primary);
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.commit-history h4 {
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    color: var(--theme-text-secondary);
+}
+
+#commit-list {
+    list-style: none;
+}
+
+#commit-list li {
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--theme-border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#commit-list li:last-child {
+    border-bottom: none;
+}
+
+/* Loop Controls */
+.loop-controls {
+    display: flex;
+    gap: 1rem;
+    margin-top: 2rem;
+}
+
+.loop-controls button {
+    padding: 0.75rem 1.5rem;
+    background: var(--theme-accent-purple);
+    border: none;
+    border-radius: 0.5rem;
+    color: white;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.loop-controls button:hover {
+    background: var(--theme-accent-purple-dark);
+    transform: translateY(-2px);
+}
+
+.loop-controls button.pause {
+    background: var(--theme-warning-color);
+}
+
+.loop-controls button.stop {
+    background: var(--theme-error-color);
+}
+
+/* Feature Vibe Section */
+.feature-vibe-section {
+    margin-bottom: 1.5rem;
+}
+
+.feature-vibe-section label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: var(--theme-text-primary);
+}
+
+.feature-vibe-section textarea {
+    width: 100%;
+    padding: 1rem;
+    background: var(--theme-bg-primary);
+    border: 1px solid var(--theme-border-color);
+    border-radius: 0.5rem;
+    color: var(--theme-text-primary);
+    resize: vertical;
+    font-family: inherit;
+}
+
+.feature-vibe-section textarea:focus {
+    outline: none;
+    border-color: var(--theme-accent-purple);
+}
+
+.char-count {
+    display: block;
+    text-align: right;
+    font-size: 0.9rem;
+    color: var(--theme-text-tertiary);
+    margin-top: 0.5rem;
+}
+
+/* Iteration Brief */
+.iteration-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.iteration-content {
+    background: var(--theme-bg-primary);
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.iteration-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    padding: 0.5rem 1rem;
+    background: var(--theme-bg-tertiary);
+    border-radius: 0.5rem;
+}
+
+.status-label {
+    font-weight: 500;
+    color: var(--theme-text-secondary);
+}
+
+#iterationStatus {
+    color: var(--theme-accent-purple);
+    font-weight: 500;
+}
+
+#iterationBrief {
+    background: var(--theme-code-bg);
+    border: 1px solid var(--theme-code-border);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    overflow: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+/* Diff Summary */
+#diffSummary {
+    background: var(--theme-bg-primary);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+#diffSummary h4 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--theme-text-primary);
+}
+
+#diffSummary p {
+    margin-bottom: 0.5rem;
+    color: var(--theme-text-secondary);
+}
+
+.summary-text {
+    background: var(--theme-bg-tertiary);
+    border-radius: 0.25rem;
+    padding: 0.5rem;
+    margin-top: 0.5rem;
+    font-style: italic;
+    color: var(--theme-text-secondary);
 }

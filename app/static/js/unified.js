@@ -202,6 +202,49 @@ class VibeCoderApp {
         if (newAnalysisBtn) {
             newAnalysisBtn.addEventListener('click', () => window.location.reload());
         }
+        
+        // Mark feature complete button
+        const markCompleteBtn = document.querySelector('.mark-feature-done');
+        if (markCompleteBtn) {
+            markCompleteBtn.addEventListener('click', () => {
+                window.vibeCoderLoop?.archiveFeature();
+            });
+        }
+    }
+    
+    resetWizard() {
+        this.currentStep = 1;
+        this.state = {
+            mode: 'vibe',
+            stage: null,
+            vibe: '',
+            repository: null,
+            dockerEnabled: false,
+            dockerServices: [],
+            plannerOutput: '',
+            previousOutput: null,
+            feedbackLog: null,
+            jobId: null
+        };
+        
+        // Reset UI to initial state
+        this.updateStepVisibility();
+        this.updateStepIndicators();
+        
+        // Clear form fields
+        document.getElementById('vibeStatement').value = '';
+        document.getElementById('useDocker').checked = false;
+        
+        // Reset mode cards
+        document.querySelectorAll('.mode-card').forEach(card => {
+            card.classList.remove('active');
+        });
+        document.getElementById('vibe-mode').classList.add('active');
+        
+        // Show vibe workflow
+        document.getElementById('vibe-workflow').classList.remove('hidden');
+        document.getElementById('classic-workflow').classList.add('hidden');
+        document.getElementById('results').classList.add('hidden');
     }
     
     handleFileUpload(file) {
