@@ -375,15 +375,35 @@ class TestExecutor:
                 return {'error': 'No Docker image specified and no docker-compose.yml found'}
         
         # Run with specified image
+        # First check what test framework is available
+        test_command = self._get_docker_test_command()
+        
         cmd = [
             'docker', 'run', '--rm',
             '-v', f'{self.repo_path}:/app',
             '-w', '/app',
             image,
-            'sh', '-c', 'make test || npm test || pytest || go test ./...'
+            'sh', '-c', test_command
         ]
         
         return self._execute_command(cmd, 'docker')
+    
+    def _get_docker_test_command(self) -> str:
+        """Determine the appropriate test command to run in Docker"""
+        # Check for various test frameworks/files
+        if (self.repo_path / 'package.json').exists():
+            return 'npm test'
+        elif (self.repo_path / 'setup.py').exists() or (self.repo_path / 'pyproject.toml').exists():
+            return 'pytest || python -m pytest || python -m unittest discover'
+        elif (self.repo_path / 'go.mod').exists():
+            return 'go test ./...'
+        elif (self.repo_path / 'Cargo.toml').exists():
+            return 'cargo test'
+        elif (self.repo_path / 'Makefile').exists():
+            return 'make test'
+        else:
+            # Try common test commands
+            return 'make test || npm test || pytest || go test ./... || cargo test'
     
     def _run_docker_compose_tests(self) -> Dict:
         """Run tests using docker-compose"""

@@ -93,6 +93,16 @@ class LogViewer {
     }
     
     addLog(log) {
+        // Ensure log has required properties
+        if (!log || typeof log !== 'object') {
+            console.warn('Invalid log object received:', log);
+            return;
+        }
+        
+        // Add default values for missing properties
+        log.level = log.level || 'info';
+        log.message = log.message || 'No message';
+        
         // Add timestamp if not present
         if (!log.timestamp) {
             log.timestamp = new Date().toISOString();
@@ -133,12 +143,13 @@ class LogViewer {
     
     appendLogEntry(log) {
         const logEntry = document.createElement('div');
-        logEntry.className = `log-entry log-${log.level.toLowerCase()}`;
+        const logLevel = log.level || 'info';  // Default to 'info' if level is missing
+        logEntry.className = `log-entry log-${logLevel.toLowerCase()}`;
         
         logEntry.innerHTML = `
             <span class="log-timestamp">${this.formatTimestamp(log.timestamp)}</span>
-            <span class="log-level">${log.level}</span>
-            <span class="log-message">${this.escapeHtml(log.message)}</span>
+            <span class="log-level">${logLevel.toUpperCase()}</span>
+            <span class="log-message">${this.escapeHtml(log.message || '')}</span>
             ${log.details ? `<pre class="log-details">${this.escapeHtml(JSON.stringify(log.details, null, 2))}</pre>` : ''}
             ${log.source ? `<span class="log-source">${log.source}</span>` : ''}
         `;

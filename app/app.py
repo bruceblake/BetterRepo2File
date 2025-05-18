@@ -1351,7 +1351,13 @@ def run_tests():
                     cmd = ['docker-compose', '-f', compose_file, 'run', '--rm', 'test']
                     if 'test' not in compose_check.stdout:
                         # Try default service name or app
-                        cmd = ['docker-compose', '-f', compose_file, 'run', '--rm', 'app', 'npm', 'test']
+                        # Check if package.json exists before trying npm test
+                        package_json_path = os.path.join(repo_path, 'package.json')
+                        if os.path.exists(package_json_path):
+                            cmd = ['docker-compose', '-f', compose_file, 'run', '--rm', 'app', 'npm', 'test']
+                        else:
+                            # Try Python tests
+                            cmd = ['docker-compose', '-f', compose_file, 'run', '--rm', 'app', 'pytest']
                     
                     result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, timeout=600)
                     
