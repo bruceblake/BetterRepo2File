@@ -103,7 +103,20 @@ class WorkflowController {
             card.classList.add('hidden');
         });
         
-        const step = document.getElementById(`step${stepNumber}`);
+        let stepId;
+        switch(stepNumber) {
+            case 1: stepId = 'step1'; break;
+            case 2: stepId = 'step2'; break;
+            case 3: stepId = 'step3'; break;
+            case 4: stepId = 'step4'; break;
+            case 5: stepId = 'stepIteration'; break;
+            case 6: stepId = 'stepIterationPlanning'; break;
+            case 7: stepId = 'stepIterationCoding'; break;
+            case 8: stepId = 'stepIterationCoding'; break;
+            default: stepId = `step${stepNumber}`;
+        }
+        
+        const step = document.getElementById(stepId);
         if (step) {
             step.classList.remove('hidden');
         }
@@ -432,6 +445,11 @@ async function runTests() {
     testBtn.innerHTML = '<span class="material-symbols-outlined">pending</span> Running...';
     
     try {
+        console.log('Running tests with:', {
+            repo_path: window.workflow.state.repoUrl,
+            session_id: window.workflow.state.sessionId
+        });
+        
         const response = await fetch('/api/run-tests', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -441,11 +459,18 @@ async function runTests() {
             })
         });
         
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || `HTTP error! status: ${response.status}`);
+        }
+        
         const result = await response.json();
-        displayTestResults(result);
+        console.log('Test result:', result);
+        displayTestResults(result.results || result);
         
     } catch (error) {
-        alert('Error running tests: ' + error.message);
+        console.error('Error running tests:', error);
+        displayTestResults({ error: error.message });
     } finally {
         testBtn.disabled = false;
         testBtn.innerHTML = '<span class="material-symbols-outlined">play_arrow</span> Run Tests';
@@ -456,6 +481,17 @@ function displayTestResults(results) {
     const resultsDiv = document.getElementById('testResults');
     if (resultsDiv) {
         resultsDiv.classList.remove('hidden');
+        
+        // Handle error response
+        if (results.error) {
+            resultsDiv.innerHTML = `
+                <div class="test-summary has-failures">
+                    <h5>Test Error</h5>
+                    <div class="test-error">${results.error}</div>
+                </div>
+            `;
+            return;
+        }
         
         const passed = results.passed || 0;
         const failed = results.failed || 0;
@@ -469,9 +505,81 @@ function displayTestResults(results) {
                     ${failed > 0 ? `<span class="failed">✗ ${failed} failed</span>` : ''}
                     <span class="total">${total} total</span>
                 </div>
+                ${results.framework ? `<div class="test-framework">Framework: ${results.framework}</div>` : ''}
             </div>
             ${results.output ? `<pre class="test-output">${results.output}</pre>` : ''}
         `;
+    }
+}
+
+// Reset Workflow
+function resetWorkflow() {
+    if (confirm('Are you sure you want to reset the entire workflow? All progress will be lost.')) {
+        // Clear the workflow state
+        window.workflow.state = {
+            repoUrl: '',
+            branch: 'main',
+            vibe: '',
+            plannerOutput: '',
+            currentStep: 1,
+            jobId: null,
+            sessionId: null,
+            lastCommitSha: null
+        };
+        
+        // Clear the UI - check if elements exist before setting values
+        const elements = {
+            'githubUrlInputRepo': { type: 'value', value: '' },
+            'githubBranch': { type: 'value', value: 'main' },
+            'vibeStatement': { type: 'value', value: '' },
+            'sectionAOutput': { type: 'textContent', value: '' },
+            'sectionBOutput': { type: 'textContent', value: '' },
+            'plannerInput': { type: 'value', value: '' },
+            'feedbackText': { type: 'value', value: '' },
+            'iterationPlannerInput': { type: 'value', value: '' },
+            'iterationPlannerOutput': { type: 'textContent', value: '' },
+            'iterationCoderOutput': { type: 'textContent', value: '' },
+            'refinedPromptText': { type: 'textContent', value: '' }
+        };
+        
+        for (const [id, config] of Object.entries(elements)) {
+            const element = document.getElementById(id);
+            if (element) {
+                if (config.type === 'value') {
+                    element.value = config.value;
+                } else {
+                    element.textContent = config.value;
+                }
+            }
+        }
+        
+        // Clear and hide results sections
+        const testResults = document.getElementById('testResults');
+        if (testResults) {
+            testResults.innerHTML = '';
+            testResults.classList.add('hidden');
+        }
+        
+        const commitHistory = document.getElementById('commitHistory');
+        if (commitHistory) {
+            commitHistory.innerHTML = '';
+            commitHistory.classList.add('hidden');
+        }
+        
+        const refinedPromptSection = document.getElementById('refinedPromptSection');
+        if (refinedPromptSection) {
+            refinedPromptSection.classList.add('hidden');
+        }
+        
+        // Reset step visibility
+        window.workflow.showStep(1);
+        window.workflow.updateProgressIndicator();
+        window.workflow.saveState();
+        
+        // Clear localStorage
+        localStorage.removeItem('workflowState');
+        
+        alert('Workflow has been reset.');
     }
 }
 
@@ -481,6 +589,12 @@ async function viewCommits() {
     commitBtn.disabled = true;
     
     try {
+        console.log('Fetching commits with:', {
+            repo_path: window.workflow.state.repoUrl,
+            branch: window.workflow.state.branch,
+            session_id: window.workflow.state.sessionId
+        });
+        
         const response = await fetch('/api/get-commits', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -491,11 +605,25 @@ async function viewCommits() {
             })
         });
         
-        const commits = await response.json();
-        displayCommitHistory(commits);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || `HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log('Commits result:', result);
+        displayCommitHistory(result.commits || result);
         
     } catch (error) {
-        alert('Error fetching commits: ' + error.message);
+        console.error('Error fetching commits:', error);
+        const historyDiv = document.getElementById('commitHistory');
+        if (historyDiv) {
+            historyDiv.classList.remove('hidden');
+            historyDiv.innerHTML = `<div class="error-message">
+                <span class="material-symbols-outlined">error</span>
+                Error: ${error.message}
+            </div>`;
+        }
     } finally {
         commitBtn.disabled = false;
     }
@@ -506,12 +634,16 @@ function displayCommitHistory(commits) {
     if (historyDiv) {
         historyDiv.classList.remove('hidden');
         
-        if (!commits || commits.length === 0) {
+        // Handle both array and object response formats
+        if (!commits || (Array.isArray(commits) && commits.length === 0)) {
             historyDiv.innerHTML = '<p>No commits found</p>';
             return;
         }
         
-        const commitList = commits.map(commit => `
+        // Ensure commits is an array
+        const commitArray = Array.isArray(commits) ? commits : [];
+        
+        const commitList = commitArray.map(commit => `
             <div class="commit-item">
                 <div class="commit-header">
                     <code class="commit-sha">${commit.sha.substring(0, 7)}</code>

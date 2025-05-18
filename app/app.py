@@ -122,11 +122,23 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
                 os.makedirs(repo_path, exist_ok=True)
                 repo_file.save(os.path.join(repo_path, repo_file.filename))
         
-        # Save other uploaded files
+        # Save other uploaded files or string data
         if previous_output:
-            previous_output.save(os.path.join(job_folder, 'previous_output.txt'))
+            if hasattr(previous_output, 'save'):
+                # It's a file upload
+                previous_output.save(os.path.join(job_folder, 'previous_output.txt'))
+            else:
+                # It's a string
+                with open(os.path.join(job_folder, 'previous_output.txt'), 'w') as f:
+                    f.write(str(previous_output))
         if feedback_log:
-            feedback_log.save(os.path.join(job_folder, 'feedback.log'))
+            if hasattr(feedback_log, 'save'):
+                # It's a file upload
+                feedback_log.save(os.path.join(job_folder, 'feedback.log'))
+            else:
+                # It's a string
+                with open(os.path.join(job_folder, 'feedback.log'), 'w') as f:
+                    f.write(str(feedback_log))
         
         send_progress(job_id, 'analyzing', 0, 0)
         
@@ -182,15 +194,45 @@ def process_job(job_id, job_folder, vibe, stage, repo_file, planner_output, prev
             cmd.extend(['--budget', '90000'])
         
         elif stage == 'C':
-            # Stage C uses iteration mode - rebuild command differently
-            cmd = [sys.executable, '-m', 'repo2file.dump_ultra', 'iterate']
+            # Stage C is for iteration planning (Gemini re-planning based on feedback)
+            cmd = [python_executable, '-m', 'repo2file.dump_ultra', 'iterate']
             cmd.extend(['--current-repo-path', repo_path if repo_path else '.'])
-            if previous_output:
-                cmd.extend(['--previous-repo2file-output', os.path.join(job_folder, 'previous_output.txt')])
             if feedback_log:
                 feedback_file = os.path.join(job_folder, 'feedback.log')
+                with open(feedback_file, 'w') as f:
+                    f.write(feedback_log)
                 cmd.extend(['--user-feedback-file', feedback_file])
             cmd.extend(['--output', output_path])
+            # Use higher token budget for planning
+            cmd.extend(['--budget', '1000000'])
+            
+        elif stage == 'D':
+            # Stage D is for iteration coding (Claude implementation of updated plan)
+            cmd = [python_executable, '-m', 'repo2file.dump_ultra']
+            if repo_path:
+                cmd.append(repo_path)
+            else:
+                cmd.append('.')
+            cmd.append(output_path)
+            cmd.extend(['--profile', 'vibe_coder_gemini_claude'])
+            cmd.extend(['--vibe', vibe])
+            
+            # Save the updated planner output
+            if planner_output:
+                planner_file = os.path.join(job_folder, 'updated_planner_output.txt')
+                with open(planner_file, 'w') as f:
+                    f.write(planner_output)
+                cmd.extend(['--planner', planner_file])
+            
+            # Save feedback for context
+            if feedback_log:
+                feedback_file = os.path.join(job_folder, 'feedback.log')
+                with open(feedback_file, 'w') as f:
+                    f.write(feedback_log)
+                cmd.extend(['--feedback', feedback_file])
+            
+            # Claude has a smaller context window
+            cmd.extend(['--budget', '90000'])
         
         
         # Run the analysis
@@ -1163,10 +1205,59 @@ def run_tests():
     try:
         data = request.get_json()
         repo_path = data.get('repo_path', '.')
+        session_id = data.get('session_id')
         test_framework = data.get('framework', 'auto')  # auto-detect by default
         
-        # Import test parser
-        from repo2file.git_diff_summarizer import TestResultParser
+        print(f"Test runner - Initial repo_path: {repo_path}, session_id: {session_id}")
+        
+        # Handle GitHub URL similar to get-commits
+        if repo_path and repo_path.startswith('https://github.com'):
+            if session_id:
+                # Try multiple folder patterns
+                folders_to_check = [
+                    os.path.join(app.config['UPLOAD_FOLDER'], f'session_{session_id}'),
+                    os.path.join(app.config['UPLOAD_FOLDER'], f'job_{session_id}')
+                ]
+                
+                # Also check all job folders for matching session_id
+                for job_id, job_data in jobs.items():
+                    if job_data.get('session_id') == session_id:
+                        folders_to_check.append(os.path.join(app.config['UPLOAD_FOLDER'], f'job_{job_id}'))
+                
+                # Check each folder for repo
+                for folder in folders_to_check:
+                    potential_repo = os.path.join(folder, 'repo')
+                    if os.path.exists(potential_repo):
+                        repo_path = potential_repo
+                        print(f"Test runner - Found repo at: {repo_path}")
+                        break
+                else:
+                    # Last resort: check all job folders for any repo
+                    all_folders = os.listdir(app.config['UPLOAD_FOLDER'])
+                    for folder_name in all_folders:
+                        if folder_name.startswith('job_'):
+                            folder_path = os.path.join(app.config['UPLOAD_FOLDER'], folder_name)
+                            potential_repo = os.path.join(folder_path, 'repo')
+                            if os.path.exists(potential_repo):
+                                # Verify it's a git repo and matches our URL
+                                try:
+                                    check_cmd = ['git', '-C', potential_repo, 'config', '--get', 'remote.origin.url']
+                                    result = subprocess.run(check_cmd, capture_output=True, text=True)
+                                    if result.returncode == 0 and repo_path in result.stdout:
+                                        repo_path = potential_repo
+                                        print(f"Test runner - Found matching repo at: {repo_path}")
+                                        break
+                                except:
+                                    pass
+                
+                if not os.path.exists(repo_path):
+                    return jsonify({'error': 'Repository not found for session'}), 404
+            else:
+                return jsonify({'error': 'Session ID required for GitHub repos'}), 400
+        
+        print(f"Test runner - Final repo_path: {repo_path}")
+        
+        # Test running logic
         
         results = {}
         
@@ -1185,28 +1276,71 @@ def run_tests():
             
             for framework, cmd in test_commands:
                 try:
+                    print(f"Test runner - Trying {framework} with command: {cmd}")
                     result = subprocess.run(cmd, 
                                           capture_output=True, 
                                           text=True,
                                           cwd=repo_path,
                                           timeout=300)  # 5 minute timeout
+                    print(f"Test runner - {framework} return code: {result.returncode}")
                     
                     if result.returncode != -1:  # Command exists
-                        parser = TestResultParser()
-                        test_result = parser.parse_output(result.stdout + result.stderr, framework)
+                        # Simple test result parsing based on return code and output
+                        output = result.stdout + result.stderr
+                        test_passed = result.returncode == 0
                         
-                        if test_result.total_tests > 0:  # Found actual tests
+                        # Try to extract test counts from output
+                        passed_count = 0
+                        failed_count = 0
+                        
+                        # Common test output patterns
+                        if 'pytest' in cmd[0] or framework == 'pytest':
+                            # Look for pytest summary
+                            import re
+                            summary_match = re.search(r'(\d+) passed', output)
+                            if summary_match:
+                                passed_count = int(summary_match.group(1))
+                            fail_match = re.search(r'(\d+) failed', output)
+                            if fail_match:
+                                failed_count = int(fail_match.group(1))
+                        
+                        elif 'npm' in cmd[0] or 'yarn' in cmd[0]:
+                            # Look for jest/mocha output  
+                            import re
+                            if 'Test Suites:' in output:  # Jest
+                                pass_match = re.search(r'(\d+) passed', output)
+                                if pass_match:
+                                    passed_count = int(pass_match.group(1))
+                                fail_match = re.search(r'(\d+) failed', output)
+                                if fail_match:
+                                    failed_count = int(fail_match.group(1))
+                        
+                        # Only report success if we found actual test output
+                        if passed_count > 0 or failed_count > 0:
                             results = {
                                 'framework': framework,
-                                'passed': test_result.passed,
-                                'failed': test_result.failed,
-                                'errors': test_result.errors,
-                                'skipped': test_result.skipped,
-                                'failure_details': test_result.failure_details,
-                                'raw_output': result.stdout + result.stderr
+                                'passed': passed_count,
+                                'failed': failed_count,
+                                'errors': failed_count,  # Simplified
+                                'skipped': 0,
+                                'output': output[:5000],  # Limit output size
+                                'success': test_passed
                             }
                             break
-                except (subprocess.TimeoutExpired, FileNotFoundError):
+                        elif test_passed:
+                            # Test command succeeded but no specific counts found
+                            results = {
+                                'framework': framework,
+                                'passed': 1,
+                                'failed': 0,
+                                'errors': 0,
+                                'skipped': 0,
+                                'output': output[:5000],
+                                'success': True
+                            }
+                            break
+                except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                    print(f"Test runner - {framework} error: {e}")
                     continue
         else:
             # Run specific framework
@@ -1227,17 +1361,18 @@ def run_tests():
                                       cwd=repo_path,
                                       timeout=300)
                 
-                parser = TestResultParser()
-                test_result = parser.parse_output(result.stdout + result.stderr, test_framework)
+                # Simple test result parsing
+                output = result.stdout + result.stderr
+                test_passed = result.returncode == 0
                 
                 results = {
                     'framework': test_framework,
-                    'passed': test_result.passed,
-                    'failed': test_result.failed,
-                    'errors': test_result.errors,
-                    'skipped': test_result.skipped,
-                    'failure_details': test_result.failure_details,
-                    'raw_output': result.stdout + result.stderr
+                    'passed': 1 if test_passed else 0,
+                    'failed': 0 if test_passed else 1,
+                    'errors': 0,
+                    'skipped': 0,
+                    'output': output[:5000],
+                    'success': test_passed
                 }
         
         if not results:
@@ -1249,6 +1384,9 @@ def run_tests():
         })
         
     except Exception as e:
+        print(f"Test runner error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/refine-prompt', methods=['POST'])
@@ -1445,29 +1583,76 @@ def get_commits():
         if repo_path and repo_path.startswith('https://github.com'):
             # Extract repo name from URL
             repo_name = repo_path.split('/')[-1].replace('.git', '')
-            # Use the cached cloned repo
+            # Use the cached cloned repo - try multiple strategies
             if session_id:
-                job_folder = os.path.join(app.config['UPLOAD_FOLDER'], f'job_{session_id}')
-                repo_path = os.path.join(job_folder, 'repo')
+                # Try multiple folder patterns
+                folders_to_check = [
+                    os.path.join(app.config['UPLOAD_FOLDER'], f'session_{session_id}'),
+                    os.path.join(app.config['UPLOAD_FOLDER'], f'job_{session_id}')
+                ]
+                
+                # Also check all job folders for matching session_id
+                for job_id, job_data in jobs.items():
+                    if job_data.get('session_id') == session_id:
+                        folders_to_check.append(os.path.join(app.config['UPLOAD_FOLDER'], f'job_{job_id}'))
+                
+                # Check each folder for repo
+                for folder in folders_to_check:
+                    potential_repo = os.path.join(folder, 'repo')
+                    if os.path.exists(potential_repo):
+                        repo_path = potential_repo
+                        print(f"Found repo at: {repo_path}")
+                        break
+                else:
+                    # Last resort: check all job folders for any repo
+                    all_folders = os.listdir(app.config['UPLOAD_FOLDER'])
+                    for folder_name in all_folders:
+                        if folder_name.startswith('job_'):
+                            folder_path = os.path.join(app.config['UPLOAD_FOLDER'], folder_name)
+                            potential_repo = os.path.join(folder_path, 'repo')
+                            if os.path.exists(potential_repo):
+                                # Verify it's a git repo and matches our URL
+                                try:
+                                    check_cmd = ['git', '-C', potential_repo, 'config', '--get', 'remote.origin.url']
+                                    result = subprocess.run(check_cmd, capture_output=True, text=True)
+                                    if result.returncode == 0 and repo_path in result.stdout:
+                                        repo_path = potential_repo
+                                        print(f"Found matching repo at: {repo_path}")
+                                        break
+                                except:
+                                    pass
+                
+                if not os.path.exists(repo_path):
+                    return jsonify({'error': 'Repository not found for session'}), 404
             else:
                 return jsonify({'error': 'Session ID required for GitHub repos'}), 400
         
         if not os.path.exists(repo_path):
             return jsonify({'error': 'Repository not found'}), 404
             
-        # Import git analyzer
-        from git_analyzer import GitAnalyzer
-        analyzer = GitAnalyzer(repo_path)
-        
-        # Get recent commits
-        commits = analyzer.get_recent_commits(branch=branch, limit=10)
-        
-        # Add diff for each commit
-        for commit in commits:
-            diff_data = analyzer.get_commit_diff(commit['sha'])
-            commit['diff_stats'] = diff_data.get('stats', {})
+        # Get commits using git command directly
+        try:
+            # Get the list of recent commits
+            cmd = ['git', '-C', repo_path, 'log', '--oneline', '-n', '10', '--format=%H|%an|%ae|%at|%s']
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             
-        return jsonify(commits)
+            commits = []
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    parts = line.split('|', 4)
+                    if len(parts) >= 5:
+                        commit = {
+                            'sha': parts[0],
+                            'author': parts[1],
+                            'email': parts[2],
+                            'timestamp': int(parts[3]),
+                            'message': parts[4]
+                        }
+                        commits.append(commit)
+            
+            return jsonify({'commits': commits, 'success': True})
+        except subprocess.CalledProcessError as e:
+            return jsonify({'error': f'Git command failed: {e.stderr}'}), 500
         
     except Exception as e:
         print(f"Error getting commits: {e}")
@@ -1542,6 +1727,9 @@ def generate_context():
             'total': 0
         }
         job_queues[job_id] = queue.Queue()
+        
+        # Update job with session_id
+        jobs[job_id]['session_id'] = session_id
         
         # Process in background
         thread = threading.Thread(
@@ -1679,6 +1867,31 @@ def job_status(job_id):
                 break
     
     return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/api/check-session-repo', methods=['POST'])
+def check_session_repo():
+    """Debug endpoint to check if a session has a cloned repo"""
+    data = request.get_json()
+    session_id = data.get('session_id')
+    
+    result = {
+        'session_id': session_id,
+        'jobs_with_session': [],
+        'repos_found': []
+    }
+    
+    # Check which jobs have this session ID
+    for job_id, job_data in jobs.items():
+        if job_data.get('session_id') == session_id:
+            result['jobs_with_session'].append(job_id)
+            
+            # Check if repo exists
+            job_folder = os.path.join(app.config['UPLOAD_FOLDER'], f'job_{job_id}')
+            repo_path = os.path.join(job_folder, 'repo')
+            if os.path.exists(repo_path):
+                result['repos_found'].append(repo_path)
+    
+    return jsonify(result)
 
 @app.route('/api/check-llm-status')
 def check_llm_status():

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Endpoints</title>
+</head>
+<body>
+    <h1>Test Endpoints</h1>
+    
+    <div>
+        <h2>Test /api/get-commits</h2>
+        <input type="text" id="testRepoUrl" value="https://github.com/test/repo" placeholder="Repo URL">
+        <input type="text" id="testSessionId" value="test-session-123" placeholder="Session ID">
+        <button onclick="testGetCommits()">Test Get Commits</button>
+        <pre id="commitsResult"></pre>
+    </div>
+    
+    <div>
+        <h2>Test /api/run-tests</h2>
+        <button onclick="testRunTests()">Test Run Tests</button>
+        <pre id="testsResult"></pre>
+    </div>
+    
+    <script>
+    async function testGetCommits() {
+        const response = await fetch('/api/get-commits', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                repo_path: document.getElementById('testRepoUrl').value,
+                session_id: document.getElementById('testSessionId').value,
+                branch: 'main'
+            })
+        });
+        
+        const result = await response.json();
+        document.getElementById('commitsResult').textContent = JSON.stringify(result, null, 2);
+    }
+    
+    async function testRunTests() {
+        const response = await fetch('/api/run-tests', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                repo_path: document.getElementById('testRepoUrl').value,
+                session_id: document.getElementById('testSessionId').value
+            })
+        });
+        
+        const result = await response.json();
+        document.getElementById('testsResult').textContent = JSON.stringify(result, null, 2);
+    }
+    </script>
+</body>
+</html>

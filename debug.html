@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Endpoint Debug</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ccc; }
+        .output { background: #f0f0f0; padding: 10px; margin: 10px 0; }
+        button { padding: 10px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Endpoint Debug</h1>
+    
+    <div class="test-section">
+        <h2>Test Generate Context</h2>
+        <button onclick="testGenerateContext()">Test Stage A</button>
+        <button onclick="testGenerateContextC()">Test Stage C</button>
+        <pre id="generateOutput" class="output"></pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test Get Commits</h2>
+        <input type="text" id="testSessionId" placeholder="Session ID">
+        <button onclick="testGetCommits()">Test</button>
+        <pre id="commitsOutput" class="output"></pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test Run Tests</h2>
+        <button onclick="testRunTests()">Test</button>
+        <pre id="testsOutput" class="output"></pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>Check Session Repo</h2>
+        <button onclick="checkSessionRepo()">Check</button>
+        <pre id="sessionOutput" class="output"></pre>
+    </div>
+    
+    <script>
+        async function testGenerateContext() {
+            const response = await fetch('/api/generate_context', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    repo_url: 'https://github.com/test/repo',
+                    vibe: 'test vibe',
+                    stage: 'A'
+                })
+            });
+            
+            const result = await response.json();
+            document.getElementById('generateOutput').textContent = JSON.stringify(result, null, 2);
+        }
+        
+        async function testGenerateContextC() {
+            const response = await fetch('/api/generate_context', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    repo_url: 'https://github.com/test/repo',
+                    vibe: 'test vibe',
+                    stage: 'C',
+                    feedback_log: 'Test feedback',
+                    session_id: document.getElementById('testSessionId').value
+                })
+            });
+            
+            const result = await response.json();
+            document.getElementById('generateOutput').textContent = JSON.stringify(result, null, 2);
+        }
+        
+        async function testGetCommits() {
+            const sessionId = document.getElementById('testSessionId').value;
+            const response = await fetch('/api/get-commits', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    repo_path: 'https://github.com/test/repo',
+                    session_id: sessionId
+                })
+            });
+            
+            const result = await response.json();
+            document.getElementById('commitsOutput').textContent = 
+                `Status: ${response.status}\n` + JSON.stringify(result, null, 2);
+        }
+        
+        async function testRunTests() {
+            const sessionId = document.getElementById('testSessionId').value;
+            const response = await fetch('/api/run-tests', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    repo_path: 'https://github.com/test/repo',
+                    session_id: sessionId
+                })
+            });
+            
+            const result = await response.json();
+            document.getElementById('testsOutput').textContent = 
+                `Status: ${response.status}\n` + JSON.stringify(result, null, 2);
+        }
+        
+        async function checkSessionRepo() {
+            const sessionId = document.getElementById('testSessionId').value;
+            const response = await fetch('/api/check-session-repo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: sessionId
+                })
+            });
+            
+            const result = await response.json();
+            document.getElementById('sessionOutput').textContent = JSON.stringify(result, null, 2);
+        }
+    </script>
+</body>
+</html>
