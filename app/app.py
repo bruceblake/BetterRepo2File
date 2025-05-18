@@ -1424,6 +1424,307 @@ def list_rules():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/get-commits', methods=['POST'])
+def get_commits():
+    """Get commit history for a repository"""
+    try:
+        data = request.get_json()
+        repo_path = data.get('repo_path')
+        branch = data.get('branch', 'main')
+        session_id = data.get('session_id')
+        
+        # Handle GitHub URL
+        if repo_path and repo_path.startswith('https://github.com'):
+            # Extract repo name from URL
+            repo_name = repo_path.split('/')[-1].replace('.git', '')
+            # Use the cached cloned repo
+            if session_id:
+                job_folder = os.path.join(app.config['UPLOAD_FOLDER'], f'job_{session_id}')
+                repo_path = os.path.join(job_folder, 'repo')
+            else:
+                return jsonify({'error': 'Session ID required for GitHub repos'}), 400
+        
+        if not os.path.exists(repo_path):
+            return jsonify({'error': 'Repository not found'}), 404
+            
+        # Import git analyzer
+        from git_analyzer import GitAnalyzer
+        analyzer = GitAnalyzer(repo_path)
+        
+        # Get recent commits
+        commits = analyzer.get_recent_commits(branch=branch, limit=10)
+        
+        # Add diff for each commit
+        for commit in commits:
+            diff_data = analyzer.get_commit_diff(commit['sha'])
+            commit['diff_stats'] = diff_data.get('stats', {})
+            
+        return jsonify(commits)
+        
+    except Exception as e:
+        print(f"Error getting commits: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/get-diff', methods=['POST'])
+def get_diff():
+    """Get diff for a specific commit"""
+    try:
+        data = request.get_json()
+        repo_path = data.get('repo_path')
+        sha = data.get('sha')
+        session_id = data.get('session_id')
+        
+        # Handle GitHub URL
+        if repo_path and repo_path.startswith('https://github.com'):
+            if session_id:
+                job_folder = os.path.join(app.config['UPLOAD_FOLDER'], f'job_{session_id}')
+                repo_path = os.path.join(job_folder, 'repo')
+            else:
+                return jsonify({'error': 'Session ID required for GitHub repos'}), 400
+        
+        if not os.path.exists(repo_path):
+            return jsonify({'error': 'Repository not found'}), 404
+            
+        # Import git analyzer
+        from git_analyzer import GitAnalyzer
+        analyzer = GitAnalyzer(repo_path)
+        
+        # Get diff data
+        diff_data = analyzer.get_commit_diff(sha)
+        
+        return jsonify({
+            'sha': sha,
+            'additions': diff_data.get('stats', {}).get('additions', 0),
+            'deletions': diff_data.get('stats', {}).get('deletions', 0),
+            'files': list(diff_data.get('stats', {}).get('files', {}).keys()),
+            'content': diff_data.get('diff_content', '')
+        })
+        
+    except Exception as e:
+        print(f"Error getting diff: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/generate_context', methods=['POST'])
+def generate_context():
+    """Generate context for different stages of the workflow"""
+    try:
+        data = request.get_json()
+        print(f"Received generate_context request: {data}")
+        
+        repo_url = data.get('repo_url')
+        repo_branch = data.get('repo_branch', 'main')
+        vibe = data.get('vibe')
+        stage = data.get('stage')
+        planner_output = data.get('planner_output', '')
+        feedback_log = data.get('feedback_log', '')
+        session_id = data.get('session_id', str(uuid.uuid4()))
+        
+        print(f"Parameters: repo_url={repo_url}, branch={repo_branch}, stage={stage}")
+        
+        # Create a job
+        job_id = str(uuid.uuid4())
+        job_folder = os.path.join(app.config['UPLOAD_FOLDER'], f'job_{job_id}')
+        os.makedirs(job_folder, exist_ok=True)
+        
+        # Initialize job tracking
+        jobs[job_id] = {
+            'status': 'pending',
+            'phase': 'initializing',
+            'current': 0,
+            'total': 0
+        }
+        job_queues[job_id] = queue.Queue()
+        
+        # Process in background
+        thread = threading.Thread(
+            target=process_job,
+            args=(job_id, job_folder, vibe, stage, None, planner_output, None, feedback_log,
+                  'github', None, repo_url, repo_branch)
+        )
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'session_id': session_id
+        })
+        
+    except Exception as e:
+        print(f"Error in generate_context: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/refine_prompt_v2', methods=['POST'])
+def refine_prompt_v2():
+    """Refine a user's feature description using AI"""
+    try:
+        data = request.get_json()
+        prompt = data.get('prompt')
+        repo_url = data.get('repo_url')
+        
+        if not prompt:
+            return jsonify({'error': 'No prompt provided'}), 400
+            
+        # Import the LLM augmenter
+        from repo2file.llm_augmenter import LLMAugmenter
+        
+        # Check if API key is available in environment
+        has_gemini_key = bool(os.getenv('GEMINI_API_KEY'))
+        has_google_key = bool(os.getenv('GOOGLE_API_KEY'))
+        
+        print(f"Checking API keys - GEMINI_API_KEY: {has_gemini_key}, GOOGLE_API_KEY: {has_google_key}")
+        
+        if not has_gemini_key and not has_google_key:
+            print("No API keys found, using fallback")
+            # Provide a helpful enhancement without AI
+            repo_name = repo_url.split('/')[-1].replace('.git', '') if repo_url else 'current repository'
+            return jsonify({
+                'success': True,
+                'refined_prompt': f"Enhanced Feature Description:\n\n{prompt}\n\nImplementation Details:\n- Repository: {repo_name}\n- Focus on clean, maintainable code\n- Include comprehensive tests\n- Consider edge cases and error handling\n- Document any API changes"
+            })
+        
+        try:
+            # Create augmenter instance (it will use env vars)
+            augmenter = LLMAugmenter(
+                provider="gemini",
+                api_key_env_var="GOOGLE_API_KEY" if has_google_key else "GEMINI_API_KEY"
+            )
+            
+            # Check if the augmenter is available
+            if not augmenter.is_available():
+                print("LLM augmenter not available")
+                raise Exception("LLM provider not available")
+            
+            # Create a simple repo context if URL provided
+            repo_context = ""
+            if repo_url:
+                repo_name = repo_url.split('/')[-1].replace('.git', '')
+                repo_context = f"Repository: {repo_name}"
+            
+            # Refine the prompt
+            print(f"Attempting to refine prompt: {prompt[:100]}...")
+            refined = augmenter.refine_user_prompt(prompt, repo_context)
+            print(f"Successfully refined prompt")
+            
+            return jsonify({
+                'success': True,
+                'refined_prompt': refined
+            })
+            
+        except Exception as llm_error:
+            print(f"LLM error: {llm_error}")
+            # Try the existing refine endpoint as fallback
+            try:
+                print("Trying original refine endpoint")
+                response = refine_prompt()
+                return response
+            except Exception:
+                # Final fallback
+                raise llm_error
+        
+    except Exception as e:
+        print(f"Error refining prompt: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Fallback to simple enhancement if AI fails
+        repo_name = repo_url.split('/')[-1].replace('.git', '') if repo_url else 'current repository'
+        refined = f"Enhanced Feature Description:\n\n{prompt}\n\nImplementation notes:\n- Target repository: {repo_name}\n- Implement with clean, testable code\n- Include proper error handling\n- Add comprehensive documentation"
+        
+        return jsonify({
+            'success': True,
+            'refined_prompt': refined
+        })
+
+@app.route('/api/job_status/<job_id>')
+def job_status(job_id):
+    """Stream job status updates using Server-Sent Events"""
+    def generate():
+        job_queue = job_queues.get(job_id)
+        
+        if not job_queue:
+            yield f"data: {json.dumps({'error': 'Invalid job ID'})}\n\n"
+            return
+        
+        while True:
+            try:
+                # Check if job is complete
+                if job_id in jobs:
+                    job_info = jobs[job_id]
+                    if job_info.get('status') == 'completed':
+                        yield f"data: {json.dumps({'status': 'completed', 'result': job_info.get('result', {})})}\n\n"
+                        break
+                    elif job_info.get('status') == 'error':
+                        yield f"data: {json.dumps({'status': 'error', 'error': job_info.get('error', 'Unknown error')})}\n\n"
+                        break
+                
+                # Get progress update from queue (with timeout)
+                update = job_queue.get(timeout=1.0)
+                yield f"data: {json.dumps(update)}\n\n"
+                
+            except queue.Empty:
+                # Send heartbeat to keep connection alive
+                yield f"data: {json.dumps({'heartbeat': True})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                break
+    
+    return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/api/check-llm-status')
+def check_llm_status():
+    """Check if LLM APIs are configured and available"""
+    try:
+        # Check environment variables
+        has_gemini_key = bool(os.getenv('GEMINI_API_KEY'))
+        has_google_key = bool(os.getenv('GOOGLE_API_KEY'))
+        has_openai_key = bool(os.getenv('OPENAI_API_KEY'))
+        
+        # Try to create an augmenter and check availability
+        from repo2file.llm_augmenter import LLMAugmenter
+        
+        provider_status = {}
+        
+        if has_gemini_key or has_google_key:
+            try:
+                augmenter = LLMAugmenter(
+                    provider="gemini",
+                    api_key_env_var="GOOGLE_API_KEY" if has_google_key else "GEMINI_API_KEY"
+                )
+                provider_status['gemini'] = {
+                    'configured': True,
+                    'available': augmenter.is_available(),
+                    'key_env': "GOOGLE_API_KEY" if has_google_key else "GEMINI_API_KEY"
+                }
+            except Exception as e:
+                provider_status['gemini'] = {
+                    'configured': True,
+                    'available': False,
+                    'error': str(e)
+                }
+        else:
+            provider_status['gemini'] = {
+                'configured': False,
+                'available': False
+            }
+        
+        return jsonify({
+            'success': True,
+            'env_vars': {
+                'GEMINI_API_KEY': has_gemini_key,
+                'GOOGLE_API_KEY': has_google_key,
+                'OPENAI_API_KEY': has_openai_key
+            },
+            'providers': provider_status
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
 @app.route('/api/detect-docker-compose', methods=['POST'])
 def detect_docker_compose():
     """Detect docker-compose file in GitHub repository"""

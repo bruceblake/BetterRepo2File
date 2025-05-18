@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 import fnmatch
 import mimetypes
 import pathspec
+from .incremental_scanner import IncrementalScanner
 try:
     import tiktoken
     TIKTOKEN_AVAILABLE = True
@@ -1509,6 +1510,8 @@ class UltraRepo2File:
         self.code_analyzer = CodeAnalyzer()
         self.git_analyzer = None  # Will be initialized when processing a git repo
         self.llm_augmenter = None  # Will be initialized if configured
+        self.incremental_scanner = None  # Will be initialized for repo
+        self.full_rescan = False  # Track if we should do a full rescan
         
         # Track skipped files for reporting (requirement S-1)
         self.skipped_files = []  # List of (path, reason) tuples
@@ -1543,6 +1546,14 @@ class UltraRepo2File:
         self.codebase_analyzer = CodebaseAnalyzer(self.code_analyzer)
         self.manifest_generator = ManifestGenerator(self.token_manager, self.code_analyzer, self.action_block_generator)
     
+    def set_full_rescan(self, full_rescan: bool):
+        """Enable or disable full rescan mode to override incremental scanning"""
+        self.full_rescan = full_rescan
+        if full_rescan:
+            print("Full rescan mode enabled - will scan all files regardless of changes")
+        else:
+            print("Incremental scan mode enabled - will only scan changed files")
+    
     def process_repository(self, repo_path: Path, output_path: Path):
         """Process repository with all optimizations"""
         start_time = time.time()
@@ -1563,6 +1574,14 @@ class UltraRepo2File:
                 print("Not a git repository - git insights disabled")
                 self.git_analyzer = None
         
+        # Initialize IncrementalScanner for optimized scanning
+        try:
+            self.incremental_scanner = IncrementalScanner(repo_path)
+            print("Incremental scanner initialized for optimized performance")
+        except Exception as e:
+            print(f"Could not initialize incremental scanner: {e}")
+            self.incremental_scanner = None
+        
         # Check and create AI guardrails file if needed
         self._check_and_create_ai_guardrails(repo_path)
         
@@ -1575,7 +1594,25 @@ class UltraRepo2File:
             if current % 100 == 0:
                 print(f"Scanned {current}/{total} files...")
         
-        files = self.scanner.scan_directory(repo_path, exclusion_spec, progress_callback)
+        # Use incremental scanner if available and not doing full rescan
+        if self.incremental_scanner and not self.full_rescan:
+            try:
+                print("Using incremental scanner for optimized performance...")
+                changed_files = self.incremental_scanner.get_changed_files()
+                if changed_files is not None:
+                    print(f"Detected {len(changed_files)} changed files since last scan")
+                    # Perform incremental scan on changed files only
+                    files = self.incremental_scanner.scan(force_full=False)
+                else:
+                    print("No previous scan found, performing full scan...")
+                    files = self.incremental_scanner.scan(force_full=True)
+            except Exception as e:
+                print(f"Error using incremental scanner: {e}, falling back to regular scan")
+                files = self.scanner.scan_directory(repo_path, exclusion_spec, progress_callback)
+        else:
+            # Fall back to regular scanner
+            files = self.scanner.scan_directory(repo_path, exclusion_spec, progress_callback)
+        
         print(f"Found {len(files)} files to process")
         
         # Filter and sort files

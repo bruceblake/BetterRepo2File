@@ -3,91 +3,233 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetterRepo2File - Vibe Coder</title>
+    <title>BetterRepo2File - Vibe Coder Workflow</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet">
 </head>
 <body>
     <div class="container">
         <header>
             <h1>BetterRepo2File</h1>
-            <p>AI-powered workflow for planning → coding</p>
+            <p>AI Workflow: Gemini Planning → Claude Coding</p>
+            <button class="status-btn" onclick="checkLLMStatus()" style="position: absolute; top: 20px; right: 20px; font-size: 0.875rem;">
+                <span class="material-symbols-outlined">info</span>
+                Check LLM Status
+            </button>
         </header>
 
         <main>
-            <!-- Simple 3-Step Workflow -->
+            <!-- Workflow Progress Indicator -->
+            <div class="workflow-progress">
+                <div class="progress-step active" data-step="1">
+                    <div class="step-circle">1</div>
+                    <div class="step-label">Setup</div>
+                </div>
+                <div class="progress-line"></div>
+                <div class="progress-step" data-step="2">
+                    <div class="step-circle">2</div>
+                    <div class="step-label">AI Planning</div>
+                </div>
+                <div class="progress-line"></div>
+                <div class="progress-step" data-step="3">
+                    <div class="step-circle">3</div>
+                    <div class="step-label">Implementation</div>
+                </div>
+                <div class="progress-line"></div>
+                <div class="progress-step" data-step="4">
+                    <div class="step-circle">4</div>
+                    <div class="step-label">Test & Iterate</div>
+                </div>
+            </div>
+
+            <!-- Workflow Steps -->
             <div class="workflow-container">
-                <!-- Step 1: Feature Description -->
+                <!-- Step 1: Setup -->
                 <div class="step-card" id="step1">
                     <div class="step-header">
-                        <span class="step-number">1</span>
-                        <h3>Describe Your Feature</h3>
+                        <h3>Step 1: Setup Your Project</h3>
+                        <p>Enter your GitHub repository and describe what you want to build</p>
                     </div>
                     <div class="step-content">
-                        <div class="github-input">
-                            <input type="text" id="githubUrlInputRepo" placeholder="https://github.com/username/repo" required>
-                            <input type="text" id="githubBranch" placeholder="Branch (optional)" value="main">
+                        <div class="form-group">
+                            <label>GitHub Repository</label>
+                            <div class="github-input">
+                                <input type="url" id="githubUrlInputRepo" placeholder="https://github.com/username/repo" required>
+                                <input type="text" id="githubBranch" placeholder="Branch" value="main">
+                            </div>
                         </div>
-                        <textarea id="vibeStatement" placeholder="What would you like to build? Be specific..."></textarea>
-                        <button id="generateContextBtn" class="primary-btn">Generate Context</button>
+                        
+                        <div class="form-group">
+                            <label>What do you want to build?</label>
+                            <textarea id="vibeStatement" placeholder="Example: Add a dark mode toggle to the settings page with theme persistence..." rows="4"></textarea>
+                            <button id="refinePromptBtn" class="refine-btn">
+                                <span class="material-symbols-outlined">auto_awesome</span>
+                                Refine with AI
+                            </button>
+                        </div>
+                        
+                        <!-- Refined prompt display -->
+                        <div id="refinedPromptSection" class="refined-prompt-section hidden">
+                            <label>Refined Feature Description</label>
+                            <div class="refined-prompt-box">
+                                <div id="refinedPromptText"></div>
+                                <div class="refined-actions">
+                                    <button class="accept-btn" onclick="acceptRefinedPrompt()">
+                                        <span class="material-symbols-outlined">check</span>
+                                        Accept
+                                    </button>
+                                    <button class="reject-btn" onclick="rejectRefinedPrompt()">
+                                        <span class="material-symbols-outlined">close</span>
+                                        Reject
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="action-buttons">
+                            <button id="generateContextBtn" class="primary-btn">
+                                <span class="material-symbols-outlined">rocket_launch</span>
+                                Generate Context
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Step 2: Copy to AI Planner -->
+                <!-- Step 2: AI Planning -->
                 <div class="step-card hidden" id="step2">
                     <div class="step-header">
-                        <span class="step-number">2</span>
-                        <h3>Copy to Gemini Planner</h3>
+                        <h3>Step 2: Get AI Planning</h3>
+                        <p>Copy this context to Gemini AI for planning</p>
                     </div>
                     <div class="step-content">
-                        <div class="output-preview" id="sectionAOutput"></div>
-                        <button class="copy-btn" onclick="copyToClipboard('sectionAOutput')">Copy to Clipboard</button>
-                        <button class="next-btn" onclick="moveToStep3()">Next Step</button>
-                    </div>
-                </div>
-
-                <!-- Step 3: Paste AI Plan -->
-                <div class="step-card hidden" id="step3">
-                    <div class="step-header">
-                        <span class="step-number">3</span>
-                        <h3>Paste AI Plan</h3>
-                    </div>
-                    <div class="step-content">
-                        <textarea id="plannerOutput" placeholder="Paste Gemini's plan here..."></textarea>
-                        <button id="generateCoderContextBtn" class="primary-btn">Generate Coder Context</button>
-                    </div>
-                </div>
-
-                <!-- Step 4: Copy to Claude -->
-                <div class="step-card hidden" id="step4">
-                    <div class="step-header">
-                        <span class="step-number">4</span>
-                        <h3>Copy to Claude Coder</h3>
-                    </div>
-                    <div class="step-content">
-                        <div class="output-preview" id="sectionBOutput"></div>
-                        <button class="copy-btn" onclick="copyToClipboard('sectionBOutput')">Copy to Clipboard</button>
-                        <div class="iteration-controls">
-                            <button class="iterate-btn" onclick="startIteration()">Start Iteration</button>
+                        <div class="instruction-box">
+                            <p><strong>Instructions:</strong></p>
+                            <ol>
+                                <li>Copy the context below</li>
+                                <li>Open <a href="https://ai.google.dev/gemini-api/docs" target="_blank">Gemini AI Studio</a></li>
+                                <li>Paste the context and ask for a detailed implementation plan</li>
+                                <li>Copy Gemini's response and continue to Step 3</li>
+                            </ol>
+                        </div>
+                        
+                        <div class="output-section">
+                            <div class="output-header">
+                                <h4>Context for Gemini</h4>
+                                <button class="copy-btn" onclick="copyToClipboard('sectionAOutput')">Copy</button>
+                            </div>
+                            <div class="output-preview" id="sectionAOutput"></div>
+                        </div>
+                        
+                        <div class="action-buttons">
+                            <button class="secondary-btn" onclick="window.workflow.showStep(1)">Back</button>
+                            <button class="primary-btn" onclick="window.workflow.showStep(3)">Continue</button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Iteration Step (optional) -->
-                <div class="step-card hidden" id="stepIteration">
+                <!-- Step 3: Implementation -->
+                <div class="step-card hidden" id="step3">
                     <div class="step-header">
-                        <span class="step-number">🔄</span>
-                        <h3>Iteration</h3>
+                        <h3>Step 3: Implementation</h3>
+                        <p>Paste Gemini's plan and generate context for Claude</p>
                     </div>
                     <div class="step-content">
-                        <textarea id="feedbackText" placeholder="Paste feedback or issues..."></textarea>
-                        <button id="generateIterationBtn" class="primary-btn">Generate Update</button>
+                        <div class="form-group">
+                            <label>Paste Gemini's Plan</label>
+                            <textarea id="plannerOutput" placeholder="Paste the implementation plan from Gemini here..." rows="6"></textarea>
+                        </div>
+                        
+                        <div class="action-buttons">
+                            <button class="secondary-btn" onclick="window.workflow.showStep(2)">Back</button>
+                            <button id="generateCoderContextBtn" class="primary-btn">
+                                <span class="material-symbols-outlined">code</span>
+                                Generate Coder Context
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 4: Code & Test -->
+                <div class="step-card hidden" id="step4">
+                    <div class="step-header">
+                        <h3>Step 4: Code & Test</h3>
+                        <p>Copy context to Claude and implement your feature</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="instruction-box">
+                            <p><strong>Instructions:</strong></p>
+                            <ol>
+                                <li>Copy the context below</li>
+                                <li>Paste it into <a href="https://claude.ai" target="_blank">Claude</a></li>
+                                <li>Implement your feature with Claude's help</li>
+                                <li>Test your implementation</li>
+                            </ol>
+                        </div>
+                        
+                        <div class="output-section">
+                            <div class="output-header">
+                                <h4>Context for Claude</h4>
+                                <button class="copy-btn" onclick="copyToClipboard('sectionBOutput')">Copy</button>
+                            </div>
+                            <div class="output-preview" id="sectionBOutput"></div>
+                        </div>
+                        
+                        <div class="test-section">
+                            <h4>Test Your Implementation</h4>
+                            <div class="test-controls">
+                                <button class="test-btn" onclick="runTests()">
+                                    <span class="material-symbols-outlined">play_arrow</span>
+                                    Run Tests
+                                </button>
+                                <button class="commit-btn" onclick="viewCommits()">
+                                    <span class="material-symbols-outlined">history</span>
+                                    View Commits
+                                </button>
+                            </div>
+                            <div id="testResults" class="test-results hidden"></div>
+                            <div id="commitHistory" class="commit-history hidden"></div>
+                        </div>
+                        
+                        <div class="action-buttons">
+                            <button class="secondary-btn" onclick="window.workflow.showStep(3)">Back</button>
+                            <button class="iterate-btn" onclick="startIteration()">
+                                <span class="material-symbols-outlined">refresh</span>
+                                Start Iteration
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Iteration Step -->
+                <div class="step-card hidden" id="stepIteration">
+                    <div class="step-header">
+                        <h3>Iteration</h3>
+                        <p>Refine your implementation based on test results</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="form-group">
+                            <label>What needs improvement?</label>
+                            <textarea id="feedbackText" placeholder="Describe issues, test failures, or improvements needed..." rows="4"></textarea>
+                        </div>
+                        
+                        <div class="recent-activity">
+                            <h4>Recent Changes</h4>
+                            <div id="recentDiff" class="diff-view"></div>
+                        </div>
+                        
+                        <div class="action-buttons">
+                            <button class="secondary-btn" onclick="window.workflow.showStep(4)">Back</button>
+                            <button id="generateIterationBtn" class="primary-btn">
+                                <span class="material-symbols-outlined">update</span>
+                                Generate Update
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Progress indicator -->
+            <!-- Progress Overlay -->
             <div class="progress-overlay hidden" id="progressOverlay">
                 <div class="progress-content">
                     <div class="spinner"></div>

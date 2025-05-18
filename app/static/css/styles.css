@@ -265,6 +265,387 @@ button {
     margin-top: 1.5rem;
 }
 
+/* Workflow Progress Indicator */
+.workflow-progress {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 3rem 0;
+    padding: 0 2rem;
+}
+
+.progress-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    opacity: 0.6;
+    transition: opacity 0.3s;
+}
+
+.progress-step.active {
+    opacity: 1;
+}
+
+.step-circle {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    border: 3px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    color: var(--text-secondary);
+    transition: all 0.3s;
+}
+
+.progress-step.active .step-circle {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+}
+
+.step-label {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.progress-line {
+    flex: 1;
+    height: 3px;
+    background: var(--border-color);
+    margin: 0 1rem;
+}
+
+/* Form Groups */
+.form-group {
+    margin-bottom: 1.5rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+/* Instruction Box */
+.instruction-box {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.instruction-box ol {
+    margin: 0.5rem 0 0 1.5rem;
+    color: var(--text-secondary);
+}
+
+.instruction-box li {
+    margin-bottom: 0.5rem;
+}
+
+.instruction-box a {
+    color: var(--accent-primary);
+    text-decoration: none;
+}
+
+.instruction-box a:hover {
+    text-decoration: underline;
+}
+
+/* Output Section */
+.output-section {
+    margin-bottom: 1.5rem;
+}
+
+.output-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.output-header h4 {
+    margin: 0;
+    color: var(--text-primary);
+}
+
+/* Test Section */
+.test-section {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    margin: 1.5rem 0;
+}
+
+.test-section h4 {
+    margin: 0 0 1rem 0;
+    color: var(--text-primary);
+}
+
+.test-controls {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.test-btn, .commit-btn {
+    background: var(--accent-primary);
+    color: white;
+}
+
+.test-btn:hover, .commit-btn:hover {
+    background: var(--accent-primary-hover);
+}
+
+/* Test Results */
+.test-results {
+    margin-top: 1rem;
+}
+
+.test-summary {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.test-summary.all-passed {
+    border-color: var(--accent-success);
+}
+
+.test-summary.has-failures {
+    border-color: var(--accent-error);
+}
+
+.test-stats {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+
+.test-stats .passed {
+    color: var(--accent-success);
+}
+
+.test-stats .failed {
+    color: var(--accent-error);
+}
+
+.test-output {
+    margin-top: 1rem;
+    background: var(--bg-tertiary);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.875rem;
+    overflow-x: auto;
+}
+
+/* Commit History */
+.commit-history {
+    margin-top: 1rem;
+}
+
+.commit-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.commit-item {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.commit-header {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.commit-sha {
+    background: var(--bg-tertiary);
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.875rem;
+}
+
+.commit-author {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.commit-date {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    margin-left: auto;
+}
+
+.commit-message {
+    color: var(--text-primary);
+}
+
+.commit-diff {
+    margin-top: 0.75rem;
+}
+
+.commit-diff summary {
+    cursor: pointer;
+    color: var(--accent-primary);
+    font-size: 0.875rem;
+}
+
+.commit-diff pre {
+    margin-top: 0.5rem;
+    background: var(--bg-tertiary);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    overflow-x: auto;
+}
+
+/* Diff View */
+.diff-view {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.diff-stats {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+}
+
+.diff-stats .additions {
+    color: var(--accent-success);
+}
+
+.diff-stats .deletions {
+    color: var(--accent-error);
+}
+
+.diff-stats .files {
+    color: var(--text-secondary);
+}
+
+.diff-content {
+    background: var(--bg-primary);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.875rem;
+    overflow-x: auto;
+}
+
+/* Secondary Button */
+.secondary-btn {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 2px solid var(--border-color);
+}
+
+.secondary-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--text-secondary);
+}
+
+/* Action Buttons */
+.action-buttons {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+/* Recent Activity */
+.recent-activity {
+    margin-top: 1.5rem;
+}
+
+.recent-activity h4 {
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+}
+
+/* Refine Button */
+.refine-btn {
+    background: #8b5cf6;
+    color: white;
+    margin-top: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.refine-btn:hover {
+    background: #7c3aed;
+}
+
+/* Refined Prompt Section */
+.refined-prompt-section {
+    margin-top: 1rem;
+}
+
+.refined-prompt-box {
+    background: var(--bg-secondary);
+    border: 2px solid var(--accent-primary);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-top: 0.5rem;
+}
+
+#refinedPromptText {
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    font-size: 0.95rem;
+}
+
+.refined-actions {
+    display: flex;
+    gap: 1rem;
+}
+
+/* Pending state for buttons */
+button[disabled] {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.accept-btn {
+    background: var(--accent-success);
+    color: white;
+}
+
+.accept-btn:hover {
+    background: #059669;
+}
+
+.reject-btn {
+    background: var(--accent-error);
+    color: white;
+}
+
+.reject-btn:hover {
+    background: #dc2626;
+}
+
 /* Utility Classes */
 .hidden {
     display: none !important;
