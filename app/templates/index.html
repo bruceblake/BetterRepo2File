@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Repo2File - Convert Repository to Single File</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Repo2File UI</h1>
+            <p>Convert a repository or files to a single text file for LLM prompts</p>
+        </header>
+
+        <div class="input-section">
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="file-upload">File Upload</button>
+                <button class="tab-btn" data-tab="github-url">GitHub URL</button>
+            </div>
+
+            <div class="tab-content" id="file-upload">
+                <div class="drop-area" id="dropArea">
+                    <div class="drop-message">
+                        <p>Drag & drop files or folders here</p>
+                        <p>or</p>
+                        <label for="fileInput" class="file-input-label">Choose Files</label>
+                        <input type="file" id="fileInput" multiple webkitdirectory directory hidden>
+                    </div>
+                    <div class="file-list" id="fileList"></div>
+                </div>
+            </div>
+
+            <div class="tab-content hidden" id="github-url">
+                <div class="github-input">
+                    <input type="text" id="githubUrlInput" placeholder="Enter GitHub repository URL (e.g., https://github.com/username/repo)">
+                </div>
+            </div>
+
+            <div class="additional-options">
+                <div class="profile-select">
+                    <label for="profileSelect">Processing Profile:</label>
+                    <select id="profileSelect">
+                        <option value="">Custom Configuration</option>
+                        <option value="frontend">Frontend Development</option>
+                        <option value="backend">Backend Development</option>
+                        <option value="datascience">Data Science</option>
+                        <option value="documentation">Documentation</option>
+                        <option value="mobile">Mobile Development</option>
+                        <option value="microservices">Microservices</option>
+                    </select>
+                </div>
+                <div class="file-types">
+                    <label for="fileTypes">File types to include (space-separated, e.g., .py .js .tsx):</label>
+                    <input type="text" id="fileTypes" placeholder="Leave empty to include all files">
+                </div>
+                <div class="exclusion-options">
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="useGitignore" checked>
+                        <span class="checkbox-text">Use .gitignore file if available (reduces output size)</span>
+                    </label>
+                </div>
+                <div class="smart-mode-options">
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="smartMode" checked>
+                        <span class="checkbox-text">Use Smart Mode (AI-optimized output: auto-filter, truncate, detect binary files)</span>
+                    </label>
+                </div>
+                <div class="token-mode-options">
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="tokenMode">
+                        <span class="checkbox-text">Use Token-Aware Mode (Ultra-optimized: 500K token budget, pathspec gitignore, priority-based)</span>
+                    </label>
+                </div>
+                <div class="ultra-mode-options">
+                    <label class="checkbox-container">
+                        <input type="checkbox" id="ultraMode">
+                        <span class="checkbox-text">Use Ultra Mode (Most advanced: exact token counting, semantic analysis, caching)</span>
+                    </label>
+                    <div class="ultra-settings hidden" id="ultraSettings">
+                        <div class="model-select">
+                            <label for="llmModel">LLM Model:</label>
+                            <select id="llmModel">
+                                <option value="gpt-4" selected>GPT-4</option>
+                                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                                <option value="claude-3">Claude 3</option>
+                                <option value="llama">Llama</option>
+                            </select>
+                        </div>
+                        <div class="budget-input">
+                            <label for="tokenBudget">Token Budget:</label>
+                            <input type="number" id="tokenBudget" value="500000" min="1000" max="2000000">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="process-btn-container">
+                <button id="processBtn" class="process-btn">Generate</button>
+                <button id="previewBtn" class="preview-btn">Preview (First 10 Files)</button>
+            </div>
+        </div>
+
+        <div class="loading-indicator hidden" id="loadingIndicator">
+            <div class="spinner"></div>
+            <p>Processing... This may take a moment.</p>
+        </div>
+
+        <div class="output-section hidden" id="outputSection">
+            <div class="output-header">
+                <h2>Output</h2>
+                <div class="exclusion-info" id="exclusionInfo" style="font-size: 0.9em; margin-bottom: 10px; color: #666;">
+                </div>
+                <div class="output-actions">
+                    <button id="copyBtn" class="action-btn">Copy to Clipboard</button>
+                    <button id="downloadBtn" class="action-btn">Download</button>
+                </div>
+            </div>
+            <div class="output-content">
+                <pre id="outputContent"></pre>
+            </div>
+        </div>
+
+        <div class="error-message hidden" id="errorMessage">
+            <p id="errorText"></p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
