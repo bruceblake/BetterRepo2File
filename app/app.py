@@ -108,6 +108,9 @@ def process():
         use_token_mode = request.form.get('token_mode', 'false').lower() in ('true', 't', 'yes', 'y', '1', 'on')
         use_ultra_mode = request.form.get('ultra_mode', 'false').lower() in ('true', 't', 'yes', 'y', '1', 'on')
         
+        # Get profile if selected
+        profile = request.form.get('profile', '')
+        
         # Determine which script to use
         if use_ultra_mode:
             script_path = app.config['REPO2FILE_ULTRA_PATH']
@@ -130,6 +133,8 @@ def process():
         # Add options based on version
         if use_ultra_mode:
             cmd.extend(['--model', llm_model, '--budget', token_budget])
+            if profile:
+                cmd.extend(['--profile', profile])
         else:
             cmd.append(exclusion_file)  # Exclusion file (either .gitignore or default)
         

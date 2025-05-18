@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const downloadBtn = document.getElementById('downloadBtn');
     const errorMessage = document.getElementById('errorMessage');
     const errorText = document.getElementById('errorText');
+    const profileSelect = document.getElementById('profileSelect');
     
     // Track operation ID for downloading
     let currentOperationId = null;
@@ -69,6 +70,34 @@ document.addEventListener('DOMContentLoaded', function() {
             if (ultraModeCheckbox.checked) {
                 ultraModeCheckbox.checked = false;
             }
+        }
+    });
+    
+    // Profile selection handler
+    profileSelect.addEventListener('change', function() {
+        const selectedProfile = this.value;
+        
+        if (selectedProfile === 'gemini') {
+            // Enable ultra mode for Gemini profile
+            ultraModeCheckbox.checked = true;
+            ultraModeCheckbox.dispatchEvent(new Event('change'));
+            
+            // Set Gemini model and token budget
+            llmModelSelect.value = 'gemini-1.5-pro';
+            tokenBudgetInput.value = '1000000';
+        } else if (selectedProfile === 'datascience') {
+            // Data science profile uses ultra mode
+            ultraModeCheckbox.checked = true;
+            ultraModeCheckbox.dispatchEvent(new Event('change'));
+            
+            // Keep default model and token budget
+            llmModelSelect.value = 'gpt-4';
+            tokenBudgetInput.value = '500000';
+        } else {
+            // Other profiles use smart mode by default
+            smartModeCheckbox.checked = true;
+            ultraModeCheckbox.checked = false;
+            ultraModeCheckbox.dispatchEvent(new Event('change'));
         }
     });
     
@@ -193,6 +222,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (ultraModeCheckbox.checked) {
             formData.append('llm_model', llmModelSelect.value);
             formData.append('token_budget', tokenBudgetInput.value);
+        }
+        
+        // Add profile if selected
+        const selectedProfile = profileSelect.value;
+        if (selectedProfile) {
+            formData.append('profile', selectedProfile);
         }
         
         if (activeTab === 'file-upload') {

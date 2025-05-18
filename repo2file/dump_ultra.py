@@ -1357,9 +1357,30 @@ def main():
             profile.priority_boost[pattern] = float(boost)
             i += 2
         elif arg == '--profile' and i + 1 < len(sys.argv):
-            profile_path = Path(sys.argv[i + 1])
-            if profile_path.exists():
-                profile = ProcessingProfile.load(profile_path)
+            profile_name = sys.argv[i + 1]
+            # Load from app/profiles.py
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from app.profiles import DEFAULT_PROFILES
+            if profile_name in DEFAULT_PROFILES:
+                app_profile = DEFAULT_PROFILES[profile_name]
+                # Convert app profile to dump_ultra profile
+                profile = ProcessingProfile(
+                    name=app_profile.name,
+                    token_budget=app_profile.token_budget,
+                    model=app_profile.model,
+                    exclude_patterns=app_profile.exclude_patterns,
+                    generate_manifest=getattr(app_profile, 'generate_manifest', True),
+                    truncation_strategy=getattr(app_profile, 'truncation_strategy', 'semantic')
+                )
+                # Copy priority patterns if they exist
+                if hasattr(app_profile, 'priority_patterns'):
+                    for pattern, score in app_profile.priority_patterns.items():
+                        profile.priority_boost[pattern] = score
+            else:
+                # Try loading as a file path for backwards compatibility
+                profile_path = Path(profile_name)
+                if profile_path.exists():
+                    profile = ProcessingProfile.load(profile_path)
             i += 2
         elif arg == '--manifest':
             profile.generate_manifest = True
