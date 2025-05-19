@@ -173,8 +173,10 @@ def generate_context():
 @job_api_bp.route('/job_status/<job_id>')
 def job_status(job_id):
     """Stream job status updates using Server-Sent Events for Celery tasks"""
+    # Capture the job manager outside the generator to avoid context issues
+    job_manager = current_app.job_manager
+    
     def generate():
-        job_manager = current_app.job_manager
         last_state = None
         
         while True:

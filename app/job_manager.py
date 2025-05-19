@@ -52,7 +52,7 @@ class JobManager:
                     additional_options or {}
                 ],
                 task_id=job_id,
-                queue='default'
+                queue='celery'
             )
             
             logger.info(f"Submitted job {job_id} for processing")
@@ -75,18 +75,36 @@ class JobManager:
         try:
             result = AsyncResult(job_id, app=self.celery_app)
             
+            # Catch the error if accessing state fails
+            try:
+                state = result.state
+                info = result.info if result.info else {}
+            except ValueError as e:
+                if "Exception information must include" in str(e):
+                    # This is the Celery serialization error
+                    logger.warning(f"Celery backend error for job {job_id}, working around it")
+                    state = 'PENDING'
+                    info = {}
+                else:
+                    raise
+            
             status = {
                 'id': job_id,
-                'state': result.state,
-                'info': result.info if result.info else {}
+                'state': state,
+                'info': info
             }
             
             # Add progress information if available
-            if result.state == 'PROGRESS':
-                status['current'] = result.info.get('current', 0)
-                status['total'] = result.info.get('total', 0)
-                status['phase'] = result.info.get('phase', 'unknown')
-                status['message'] = result.info.get('message', '')
+            if state == 'PROGRESS':
+                status['current'] = info.get('current', 0)
+                status['total'] = info.get('total', 0)
+                status['phase'] = info.get('phase', 'unknown')
+                status['message'] = info.get('message', '')
+            elif state == 'SUCCESS':
+                # If successful, check if our task returned a result dict
+                if isinstance(info, dict) and 'success' in info:
+                    status['state'] = 'SUCCESS' if info.get('success') else 'FAILURE'
+                    status['result'] = info
             
             return status
             

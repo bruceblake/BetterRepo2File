@@ -15,7 +15,7 @@ import git
 # Add parent directory to Python path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-@celery_app.task(bind=True, name='process_repository_task', queue='default')
+@celery_app.task(bind=True, name='process_repository_task', queue='celery')
 def process_repository_task(
     self,
     input_repo_type: str,
@@ -39,7 +39,17 @@ def process_repository_task(
     Returns:
         dict: Processing result with output file references
     """
-    storage_manager = StorageManager()
+    # Import config directly for Celery worker context
+    from .config import Config
+    # Create a config dictionary with the necessary MinIO settings
+    config_dict = {
+        'MINIO_ENDPOINT': Config.MINIO_ENDPOINT,
+        'MINIO_ACCESS_KEY': Config.MINIO_ACCESS_KEY,
+        'MINIO_SECRET_KEY': Config.MINIO_SECRET_KEY,
+        'MINIO_SECURE': Config.MINIO_SECURE,
+        'MINIO_BUCKET_NAME': Config.MINIO_BUCKET_NAME
+    }
+    storage_manager = StorageManager(config=config_dict)
     temp_dir = None
     
     try:
@@ -74,10 +84,27 @@ def process_repository_task(
             repo_dir = os.path.join(temp_dir, 'repo')
             logger.info(f"Cloning GitHub repository: {input_repo_ref}")
             
-            if github_branch:
-                git.Repo.clone_from(input_repo_ref, repo_dir, branch=github_branch)
-            else:
-                git.Repo.clone_from(input_repo_ref, repo_dir)
+            try:
+                if github_branch:
+                    git.Repo.clone_from(input_repo_ref, repo_dir, branch=github_branch)
+                else:
+                    git.Repo.clone_from(input_repo_ref, repo_dir)
+            except git.exc.GitCommandError as e:
+                logger.error(f"Git clone failed: {e}")
+                return {
+                    'success': False,
+                    'error': f"Failed to clone repository: {str(e)}",
+                    'error_type': 'GitCommandError',
+                    'status': 'FAILURE'
+                }
+            except Exception as e:
+                logger.error(f"Unexpected error during clone: {e}")
+                return {
+                    'success': False,
+                    'error': f"Unexpected error during clone: {str(e)}",
+                    'error_type': type(e).__name__,
+                    'status': 'FAILURE'
+                }
             
             input_path = repo_dir
             
@@ -116,7 +143,8 @@ def process_repository_task(
             'standard': 'repo2file/dump.py',
             'smart': 'repo2file/dump_smart.py',
             'token': 'repo2file/dump_token_aware.py',
-            'ultra': 'repo2file/dump_ultra.py'
+            'ultra': 'repo2file/dump_ultra.py',
+            'context_generation': 'repo2file/dump_smart.py'  # Use smart mode for context generation
         }
         
         if processing_mode not in mode_scripts:
@@ -151,16 +179,52 @@ def process_repository_task(
         
         # Execute processing
         logger.info(f"Executing command: {' '.join(cmd)}")
-        process = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=os.path.dirname(os.path.abspath(__file__))
-        )
+        # Get the project root directory (parent of the app directory)
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        logger.info(f"Working directory: {project_root}")
+        
+        # Ensure the script exists
+        script_full_path = os.path.join(project_root, script_path)
+        if not os.path.exists(script_full_path):
+            logger.error(f"Script not found: {script_full_path}")
+            raise FileNotFoundError(f"Script not found: {script_full_path}")
+            
+        logger.info(f"Script exists at: {script_full_path}")
+        
+        try:
+            process = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=project_root
+            )
+            
+            # Log output even for successful runs to debug
+            logger.info(f"Process returncode: {process.returncode}")
+            
+            # Truncate large outputs for logging
+            stdout_preview = process.stdout[:1000] + "..." if process.stdout and len(process.stdout) > 1000 else process.stdout
+            stderr_preview = process.stderr[:1000] + "..." if process.stderr and len(process.stderr) > 1000 else process.stderr
+            
+            if stdout_preview:
+                logger.info(f"Process stdout preview: {stdout_preview}")
+            if stderr_preview:
+                logger.info(f"Process stderr preview: {stderr_preview}")
+                
+        except Exception as e:
+            logger.error(f"Error running subprocess: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
         
         if process.returncode != 0:
             error_msg = process.stderr if process.stderr else process.stdout
-            raise Exception(f"Processing failed: {error_msg}")
+            # Get last part of stdout if it's very long
+            stdout_tail = process.stdout[-500:] if process.stdout and len(process.stdout) > 500 else process.stdout
+            logger.error(f"Command failed with return code {process.returncode}")
+            logger.error(f"stdout tail: {stdout_tail}")
+            logger.error(f"stderr: {process.stderr}")
+            raise Exception(f"Processing failed (code {process.returncode}): {error_msg[:500]}")
         
         # Verify output was created
         if not os.path.exists(output_file):
@@ -238,11 +302,28 @@ def process_repository_task(
         
     except Exception as e:
         logger.error(f"Error processing repository: {e}")
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Full traceback: {tb}")
+        
+        # Record the error state
         self.update_state(
             state='FAILURE',
-            meta={'error': str(e)}
+            meta={
+                'error': str(e),
+                'error_type': type(e).__name__,
+                'exc_message': str(e),
+                'traceback': tb
+            }
         )
-        raise
+        # Return error result instead of raising to avoid Celery serialization issues
+        return {
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'traceback': tb,
+            'status': 'FAILURE'
+        }
         
     finally:
         # Cleanup temporary directory
@@ -290,7 +371,17 @@ def generate_llm_context_task(
     )
     from repo2file.git_analyzer import GitAnalyzer
     
-    storage_manager = StorageManager()
+    # Import config directly for Celery worker context
+    from .config import Config
+    # Create a config dictionary with the necessary MinIO settings
+    config_dict = {
+        'MINIO_ENDPOINT': Config.MINIO_ENDPOINT,
+        'MINIO_ACCESS_KEY': Config.MINIO_ACCESS_KEY,
+        'MINIO_SECRET_KEY': Config.MINIO_SECRET_KEY,
+        'MINIO_SECURE': Config.MINIO_SECURE,
+        'MINIO_BUCKET_NAME': Config.MINIO_BUCKET_NAME
+    }
+    storage_manager = StorageManager(config=config_dict)
     temp_dir = None
     
     try:

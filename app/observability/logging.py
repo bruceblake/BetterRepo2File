@@ -21,13 +21,9 @@ class ObservabilityLogger:
         # Remove existing handlers
         self.logger.handlers = []
         
-        # Create JSON formatter
-        formatter = jsonlogger.JsonFormatter(
-            fmt='%(timestamp)s %(level)s %(name)s %(message)s',
-            rename_fields={
-                'levelname': 'level',
-                'name': 'logger'
-            }
+        # Use standard formatter for now to avoid KeyError
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
         
         # Console handler
@@ -41,7 +37,6 @@ class ObservabilityLogger:
     def _add_context(self, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Add standard context to log entries."""
         context = {
-            'timestamp': datetime.utcnow().isoformat(),
             'service': 'robustrepo',
             'environment': 'production',  # Could be dynamic
         }

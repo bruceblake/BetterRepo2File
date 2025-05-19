@@ -27,9 +27,13 @@ def create_celery_app():
         task_send_sent_event=True,  # Send task-sent events for monitoring
         worker_prefetch_multiplier=1,  # Disable prefetching for better task distribution
         worker_max_tasks_per_child=1000,  # Restart worker after 1000 tasks to prevent memory leaks
+        # Fix for exception serialization
+        task_always_eager=False,
+        task_store_eager_result=True,
+        result_backend_transport_options={'master_name': 'mymaster'},
         beat_schedule={},  # No scheduled tasks for now
         task_routes={
-            'app.tasks.process_repository_task': {'queue': 'default'},
+            'app.tasks.process_repository_task': {'queue': 'celery'},
         },
         task_annotations={
             'app.tasks.process_repository_task': {

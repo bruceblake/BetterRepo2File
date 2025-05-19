@@ -69,18 +69,18 @@ def create_app(config_name=None):
     from .routes.health_routes import health_bp
     app.register_blueprint(health_bp)
     
-    # Set up observability
-    from .observability import initialize_tracing, initialize_metrics
-    from .middleware.observability_middleware import ObservabilityMiddleware
+    # Set up observability (temporarily disabled to fix logging issues)
+    # from .observability import initialize_tracing, initialize_metrics
+    # from .middleware.observability_middleware import ObservabilityMiddleware
     
-    # Initialize tracing
-    initialize_tracing(app, service_name="robustrepo", environment=config_name or "development")
+    # # Initialize tracing
+    # initialize_tracing(app, service_name="robustrepo", environment=config_name or "development")
     
-    # Initialize metrics
-    initialize_metrics(service_name="robustrepo", environment=config_name or "development")
+    # # Initialize metrics
+    # initialize_metrics(service_name="robustrepo", environment=config_name or "development")
     
-    # Add observability middleware
-    ObservabilityMiddleware(app)
+    # # Add observability middleware
+    # ObservabilityMiddleware(app)
     
     # Set up logging
     if not app.debug:

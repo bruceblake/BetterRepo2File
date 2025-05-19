@@ -2185,8 +2185,8 @@ def refine_prompt_v2():
             'refined_prompt': refined
         })
 
-@app.route('/api/job_status/<job_id>')
-def job_status(job_id):
+@app.route('/api/job_status_old/<job_id>')
+def job_status_old(job_id):
     """Stream job status updates using Server-Sent Events for Celery tasks"""
     def generate():
         job_manager = JobManager()
