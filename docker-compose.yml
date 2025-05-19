@@ -1,6 +1,40 @@
 version: '3.8'
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: betterrepo2file-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio
+    container_name: betterrepo2file-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   app:
     build:
       context: .
@@ -11,12 +45,72 @@ services:
     volumes:
       - ./app:/app/app
       - ./repo2file:/app/repo2file
+      - ./run.py:/app/run.py
       - ./uploads:/app/uploads
       - ./temp:/app/temp
     environment:
-      - FLASK_APP=app/app.py
+      - FLASK_APP=run.py
       - FLASK_ENV=development
       - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-changeme}
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_SECURE=false
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery:
+    build:
+      context: .
+      target: base
+    container_name: betterrepo2file-celery
+    command: celery -A app.celery_app:celery_app worker --loglevel=info
+    volumes:
+      - ./app:/app/app
+      - ./repo2file:/app/repo2file
+      - ./run.py:/app/run.py
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-changeme}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_SECURE=false
+    depends_on:
+      - redis
+      - minio
+    restart: unless-stopped
+
+  flower:
+    build:
+      context: .
+      target: base
+    container_name: betterrepo2file-flower
+    command: celery -A app.celery_app:celery_app flower
+    ports:
+      - "5555:5555"
+    volumes:
+      - ./app:/app/app
+      - ./repo2file:/app/repo2file
+    environment:
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-changeme}
+    depends_on:
+      - celery
     restart: unless-stopped
 
   test:
@@ -47,3 +141,7 @@ services:
       - DOCKER_HOST=unix:///var/run/docker.sock
     profiles:
       - test-docker
+
+volumes:
+  redis_data:
+  minio_data:

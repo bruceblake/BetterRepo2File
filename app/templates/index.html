@@ -431,7 +431,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="{{ url_for('static', filename='js/log-viewer.js') }}"></script>
     <script src="{{ url_for('static', filename='js/iteration-dashboard.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}?v={{ range(1000, 9999) | random }}"></script>
     <script>
         // Initialize dashboard and log viewer
         let logViewer, iterationDashboard;

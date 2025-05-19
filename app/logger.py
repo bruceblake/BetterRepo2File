@@ -6,6 +6,45 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import sys
 
+
+def setup_logging(app):
+    """Configure application logging for production use"""
+    # Configure root logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler('app.log')
+        ]
+    )
+    
+    # Configure app logger
+    app.logger.setLevel(logging.INFO)
+    
+    # Add structured logging for production
+    if not app.debug:
+        try:
+            from pythonjsonlogger import jsonlogger
+            
+            # JSON formatter for structured logging
+            json_formatter = jsonlogger.JsonFormatter()
+            
+            # File handler for JSON logs
+            json_handler = logging.FileHandler('app_json.log')
+            json_handler.setFormatter(json_formatter)
+            
+            app.logger.addHandler(json_handler)
+        except ImportError:
+            # pythonjsonlogger not installed, use standard logging
+            app.logger.warning("pythonjsonlogger not installed, using standard logging format")
+    
+    # Reduce noise from libraries
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    
+    return app.logger
+
 class IterationLogger:
     """Enhanced logger for iteration workflows with detailed output and metrics"""
     

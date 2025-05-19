@@ -656,8 +656,10 @@ class WorkflowController {
         }
         
         // Disable button and show loading state
-        refineBtn.disabled = true;
-        refineBtn.innerHTML = '<span class="material-symbols-outlined">pending</span> Refining...';
+        if (refineBtn) {
+            refineBtn.disabled = true;
+            refineBtn.innerHTML = '<span class="material-symbols-outlined">pending</span> Refining...';
+        }
         
         try {
             console.log('Sending refine request with:', {
@@ -670,11 +672,12 @@ class WorkflowController {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     prompt: vibeInput.value,
-                    repo_url: this.state.repoUrl
+                    repo_url: this.state.repoUrl || ''
                 })
             });
             
             console.log('Response status:', response.status);
+            console.log('Response headers:', response.headers);
             
             if (!response.ok) {
                 const errorText = await response.text();
@@ -690,21 +693,29 @@ class WorkflowController {
                 const refinedSection = document.getElementById('refinedPromptSection');
                 const refinedText = document.getElementById('refinedPromptText');
                 
-                refinedSection.classList.remove('hidden');
-                refinedText.textContent = result.refined_prompt;
-                
-                // Store the refined prompt
-                this.state.refinedVibe = result.refined_prompt;
-                this.saveState();
+                if (refinedSection && refinedText) {
+                    refinedSection.classList.remove('hidden');
+                    refinedText.textContent = result.refined_prompt;
+                    
+                    // Store the refined prompt
+                    this.state.refinedVibe = result.refined_prompt;
+                    this.saveState();
+                } else {
+                    console.error('Could not find refined prompt elements');
+                    alert('Refined prompt generated but display elements not found');
+                }
             } else {
                 throw new Error(result.error || 'Failed to refine prompt');
             }
         } catch (error) {
+            console.error('Error in refinePrompt:', error);
             alert('Error refining prompt: ' + error.message);
         } finally {
             // Restore button state
-            refineBtn.disabled = false;
-            refineBtn.innerHTML = '<span class="material-symbols-outlined">auto_awesome</span> Refine with AI';
+            if (refineBtn) {
+                refineBtn.disabled = false;
+                refineBtn.innerHTML = '<span class="material-symbols-outlined">auto_awesome</span> Refine with AI';
+            }
         }
     }
 }

@@ -32,8 +32,8 @@ RUN cd tests && npm init -y && npm install --save-dev jest @testing-library/dom 
 # Create test results directory
 RUN mkdir -p /app/test_results
 
-# Default command for base image
-CMD ["python", "app/app.py"]
+# Default command for base image - use the new run.py
+CMD ["python", "run.py"]
 
 # Test runner image
 FROM base as test-runner

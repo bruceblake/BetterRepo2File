@@ -25,10 +25,14 @@ if __name__ == '__main__':
     from logger import iteration_logger, log_iteration_start, log_step, log_error, log_metric, log_iteration_end
     from diff_visualizer import diff_visualizer, get_file_diff, get_git_diff
     from test_executor import test_executor, detect_test_framework, run_tests
+    from job_manager import JobManager
+    from storage_manager import StorageManager
 else:
     from .logger import iteration_logger, log_iteration_start, log_step, log_error, log_metric, log_iteration_end
     from .diff_visualizer import diff_visualizer, get_file_diff, get_git_diff
     from .test_executor import test_executor, detect_test_framework, run_tests
+    from .job_manager import JobManager
+    from .storage_manager import StorageManager
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
@@ -607,18 +611,53 @@ def status(job_id):
 
 @app.route('/api/result/<job_id>')
 def result(job_id):
-    """Get the final result of a job"""
-    if job_id not in jobs:
+    """Get the final result of a Celery job with MinIO output file references"""
+    job_manager = JobManager()
+    storage_manager = StorageManager()
+    
+    # Get job status from Celery
+    status = job_manager.get_job_status(job_id)
+    
+    if not status:
         return jsonify({'error': 'Invalid job ID'}), 404
     
-    job = jobs[job_id]
-    if job['status'] == 'processing':
-        return jsonify({'error': 'Job still processing'}), 202
+    # Check if job is still processing
+    if status['state'] in ['PENDING', 'PROGRESS', 'RETRY']:
+        return jsonify({'status': status['state'], 'info': status.get('info')}), 202
     
-    if job['status'] == 'error':
-        return jsonify({'error': job['error']}), 500
+    # Check if job failed
+    if status['state'] == 'FAILURE':
+        return jsonify({'error': status.get('info', 'Job failed')}), 500
     
-    return jsonify(job['result']), 200
+    # Job succeeded - get result
+    result = job_manager.get_job_result(job_id)
+    if not result:
+        return jsonify({'error': 'No result available'}), 404
+    
+    # Extract output file references from result
+    output_files = result.get('output_files', {})
+    
+    # Generate access URLs for each output file
+    file_access = {}
+    for name, minio_key in output_files.items():
+        try:
+            # Generate presigned URL for download
+            presigned_url = storage_manager.generate_presigned_url(minio_key)
+            file_access[name] = {
+                'minio_key': minio_key,
+                'download_url': presigned_url
+            }
+        except Exception as e:
+            file_access[name] = {
+                'minio_key': minio_key,
+                'error': f'Failed to generate download URL: {str(e)}'
+            }
+    
+    return jsonify({
+        'status': 'completed',
+        'result': result,
+        'file_access': file_access
+    }), 200
 
 @app.route('/api/v1/loop/status/<session_id>')
 def loop_status(session_id):
@@ -874,190 +913,148 @@ def get_loop_status(session_id):
 
 @app.route('/process', methods=['POST'])
 def process():
-    # Create a unique ID for this operation
-    operation_id = str(uuid.uuid4())
-    temp_dir = os.path.join(app.config['UPLOAD_FOLDER'], operation_id)
-    os.makedirs(temp_dir, exist_ok=True)
-    
-    output_file = os.path.join(temp_dir, 'output.txt')
-    
+    """Process files or GitHub repository using Celery async tasks"""
     try:
+        job_manager = JobManager()
+        storage_manager = StorageManager()
+        
+        github_branch = None  # Initialize variable
+        
+        # Determine input type and prepare input reference
         if 'files[]' in request.files:
             # Handle file uploads
             files = request.files.getlist('files[]')
             if not files or files[0].filename == '':
                 return jsonify({"error": "No files selected"}), 400
             
-            upload_dir = os.path.join(temp_dir, 'uploads')
-            os.makedirs(upload_dir, exist_ok=True)
+            # Create temporary directory for uploads
+            temp_dir = os.path.join(app.config['UPLOAD_FOLDER'], str(uuid.uuid4()))
+            os.makedirs(temp_dir, exist_ok=True)
             
+            # Save files to temp directory
             for file in files:
                 if file and file.filename:
                     filename = secure_filename(file.filename)
-                    file_path = os.path.join(upload_dir, filename)
+                    file_path = os.path.join(temp_dir, filename)
                     file.save(file_path)
             
-            input_path = upload_dir
+            # Upload to MinIO
+            zip_path = shutil.make_archive(temp_dir, 'zip', temp_dir)
+            minio_key = storage_manager.upload_data_stream(
+                object_name=f"uploads/{os.path.basename(zip_path)}",
+                data_stream=open(zip_path, 'rb'),
+                length=os.path.getsize(zip_path)
+            )
+            
+            input_repo_type = 'minio_file'
+            input_repo_ref = minio_key
+            
+            # Cleanup temp files
+            shutil.rmtree(temp_dir)
+            os.remove(zip_path)
         
         elif 'github_url' in request.form and request.form['github_url']:
             # Handle GitHub repository URL
             github_url = request.form['github_url']
-            github_branch = request.form.get('github_branch', '').strip()
-            repo_dir = os.path.join(temp_dir, 'repo')
+            github_branch = request.form.get('github_branch', '').strip() or 'main'
             
-            # Clone the repository
-            try:
-                # Clone with specific branch if provided
-                if github_branch:
-                    subprocess.run(['git', 'clone', '-b', github_branch, github_url, repo_dir], 
-                                  check=True, capture_output=True, text=True)
-                else:
-                    subprocess.run(['git', 'clone', github_url, repo_dir], 
-                                  check=True, capture_output=True, text=True)
-            except subprocess.CalledProcessError as e:
-                return jsonify({"error": f"Failed to clone repository: {e.stderr}"}), 400
-            
-            input_path = repo_dir
+            input_repo_type = 'github_url'
+            input_repo_ref = github_url
         
         else:
             return jsonify({"error": "No input provided. Please upload files or provide a GitHub URL."}), 400
         
-        # Determine if file types were specified
-        file_types = []
-        if 'file_types' in request.form and request.form['file_types']:
-            file_types = request.form['file_types'].split()
-        
-        # Check for .gitignore in the input directory
-        gitignore_path = os.path.join(input_path, '.gitignore')
+        # Get processing options from form
+        file_types = request.form.get('file_types', '').split() if request.form.get('file_types') else []
         use_gitignore = request.form.get('use_gitignore', 'true').lower() in ('true', 't', 'yes', 'y', '1', 'on')
         use_smart_mode = request.form.get('smart_mode', 'true').lower() in ('true', 't', 'yes', 'y', '1', 'on')
-        
-        # Determine which exclusion file to use
-        if use_gitignore and os.path.exists(gitignore_path):
-            exclusion_file = gitignore_path
-        else:
-            exclusion_file = app.config['EXCLUDE_FILE']
-        
-        # Check for token-aware mode
         use_token_mode = request.form.get('token_mode', 'false').lower() in ('true', 't', 'yes', 'y', '1', 'on')
         use_ultra_mode = request.form.get('ultra_mode', 'false').lower() in ('true', 't', 'yes', 'y', '1', 'on')
-        
-        # Get profile if selected
         profile = request.form.get('profile', '')
         
-        # Determine which script to use
+        # Determine processing mode
+        processing_mode = 'standard'
         if use_ultra_mode:
-            script_path = app.config['REPO2FILE_ULTRA_PATH']
-            # Add model and token budget options
-            llm_model = request.form.get('llm_model', 'gpt-4')
-            token_budget = request.form.get('token_budget', '500000')
+            processing_mode = 'ultra'
         elif use_token_mode:
-            script_path = app.config['REPO2FILE_TOKEN_PATH']
-        else:
-            script_path = app.config['REPO2FILE_SMART_PATH'] if use_smart_mode else app.config['REPO2FILE_PATH']
+            processing_mode = 'token'
+        elif use_smart_mode:
+            processing_mode = 'smart'
         
-        # Prepare command to run repo2file
+        # Prepare additional options
+        additional_options = {
+            'file_types': file_types,
+            'use_gitignore': use_gitignore,
+            'profile': profile
+        }
+        
+        # Add ultra mode specific options
         if use_ultra_mode:
-            # Run as module to avoid import issues
-            cmd = [
-                sys.executable,  # Python interpreter
-                '-m', 'repo2file.dump_ultra',
-                input_path,  # Input directory
-                output_file,  # Output file
-            ]
-        else:
-            cmd = [
-                sys.executable,  # Python interpreter
-                script_path,  # Path to dump.py or dump_smart.py
-                input_path,  # Input directory
-                output_file,  # Output file
-            ]
+            additional_options.update({
+                'llm_model': request.form.get('llm_model', 'gpt-4'),
+                'token_budget': int(request.form.get('token_budget', '500000')),
+                'intended_query': request.form.get('intended_query', '').strip(),
+                'vibe_statement': request.form.get('vibe_statement', '').strip(),
+                'planner_output': request.form.get('planner_output', '').strip()
+            })
         
-        # Add options based on version
-        if use_ultra_mode:
-            if profile:
-                cmd.extend(['--profile', profile])
-            # Only add model and budget if they differ from profile defaults or no profile
-            if llm_model and (not profile or llm_model != 'gpt-4'):
-                cmd.extend(['--model', llm_model])
-            if token_budget != '500000':
-                cmd.extend(['--budget', token_budget])
-            # Add intended query if provided
-            intended_query = request.form.get('intended_query', '').strip()
-            if intended_query:
-                cmd.extend(['--query', intended_query])
-            
-            # Add vibe statement if provided
-            vibe_statement = request.form.get('vibe_statement', '').strip()
-            if vibe_statement:
-                cmd.extend(['--vibe', vibe_statement])
-            
-            # Add planner output if provided
-            planner_output = request.form.get('planner_output', '').strip()
-            if planner_output:
-                # Save planner output to a temporary file
-                planner_file = os.path.join(temp_dir, 'planner_output.txt')
-                with open(planner_file, 'w') as f:
-                    f.write(planner_output)
-                cmd.extend(['--planner', planner_file])
-        else:
-            cmd.append(exclusion_file)  # Exclusion file (either .gitignore or default)
-        
-        # Add file types if specified
-        if file_types and not use_ultra_mode:
-            cmd.extend(file_types)
-        
-        # Run repo2file script
-        process = subprocess.run(
-            cmd,
-            check=False,  # Don't raise exception, handle error manually
-            capture_output=True,
-            text=True
+        # Submit job to Celery
+        job_id = job_manager.submit_repo_processing_job(
+            input_repo_type=input_repo_type,
+            input_repo_ref=input_repo_ref,
+            github_branch=github_branch if input_repo_type == 'github_url' else None,
+            processing_mode=processing_mode,
+            output_format='text',
+            additional_options=additional_options
         )
-        
-        if process.returncode != 0:
-            error_msg = process.stderr if process.stderr else process.stdout
-            return jsonify({"error": f"Script failed: {error_msg}"}), 500
-        
-        # Check if output file was created
-        if not os.path.exists(output_file):
-            return jsonify({"error": "Failed to generate output file"}), 500
-        
-        # Read the content of the output file
-        with open(output_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Determine which exclusion file and mode was used
-        used_gitignore = exclusion_file == gitignore_path
         
         return jsonify({
             "success": True,
-            "operation_id": operation_id,
-            "content": content,
-            "used_gitignore": used_gitignore,
-            "exclusion_file": os.path.basename(exclusion_file),
-            "smart_mode": use_smart_mode,
-            "token_mode": use_token_mode,
-            "ultra_mode": use_ultra_mode,
-            "llm_model": llm_model if use_ultra_mode else None,
-            "token_budget": token_budget if use_ultra_mode else None
+            "job_id": job_id,
+            "processing_mode": processing_mode
         })
     
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/download/<operation_id>')
-def download(operation_id):
-    # Validate operation_id to prevent directory traversal
-    if not operation_id or not all(c.isalnum() or c == '-' for c in operation_id):
+@app.route('/download/<job_id>')
+def download(job_id):
+    """Download processed output file from MinIO via job result"""
+    storage_manager = StorageManager()
+    job_manager = JobManager()
+    
+    # Validate job_id
+    if not job_id or not all(c.isalnum() or c == '-' for c in job_id):
         abort(400)
     
-    output_file = os.path.join(app.config['UPLOAD_FOLDER'], operation_id, 'output.txt')
-    
-    if not os.path.exists(output_file):
+    # Get job result to find output file reference
+    try:
+        status = job_manager.get_job_status(job_id)
+        if status['state'] != 'SUCCESS':
+            abort(404)
+        
+        result = job_manager.get_job_result(job_id)
+        output_files = result.get('output_files', {})
+        
+        # Get the main output file (typically 'output.txt')
+        if 'output.txt' in output_files:
+            minio_key = output_files['output.txt']
+        else:
+            # Fallback to first file if specific name not found
+            minio_key = list(output_files.values())[0]
+        
+        # Download from MinIO and stream to client
+        stream = storage_manager.download_stream(minio_key)
+        return Response(
+            stream,
+            mimetype='text/plain',
+            headers={
+                'Content-Disposition': 'attachment; filename=repo2file_output.txt'
+            }
+        )
+        
+    except Exception as e:
         abort(404)
-    
-    return send_file(output_file, as_attachment=True, download_name='repo2file_output.txt')
 
 @app.route('/preview', methods=['POST'])
 def preview():
@@ -2060,7 +2057,7 @@ def get_diff():
 
 @app.route('/api/generate_context', methods=['POST'])
 def generate_context():
-    """Generate context for different stages of the workflow"""
+    """Generate context for different stages of the workflow using Celery tasks"""
     try:
         data = request.get_json()
         print(f"Received generate_context request: {data}")
@@ -2075,30 +2072,24 @@ def generate_context():
         
         print(f"Parameters: repo_url={repo_url}, branch={repo_branch}, stage={stage}")
         
-        # Create a job
-        job_id = str(uuid.uuid4())
-        job_folder = os.path.join(app.config['UPLOAD_FOLDER'], f'job_{job_id}')
-        os.makedirs(job_folder, exist_ok=True)
+        # Use JobManager to submit async task
+        job_manager = JobManager()
         
-        # Initialize job tracking
-        jobs[job_id] = {
-            'status': 'pending',
-            'phase': 'initializing',
-            'current': 0,
-            'total': 0
-        }
-        job_queues[job_id] = queue.Queue()
-        
-        # Update job with session_id
-        jobs[job_id]['session_id'] = session_id
-        
-        # Process in background
-        thread = threading.Thread(
-            target=process_job,
-            args=(job_id, job_folder, vibe, stage, None, planner_output, None, feedback_log,
-                  'github', None, repo_url, repo_branch)
+        # Submit repository processing job to Celery
+        job_id = job_manager.submit_repo_processing_job(
+            input_repo_type='github_url',
+            input_repo_ref=repo_url,
+            github_branch=repo_branch,
+            processing_mode='context_generation',
+            output_format='markdown',
+            additional_options={
+                'vibe': vibe,
+                'stage': stage,
+                'planner_output': planner_output,
+                'feedback_log': feedback_log,
+                'session_id': session_id
+            }
         )
-        thread.start()
         
         return jsonify({
             'success': True,
@@ -2196,38 +2187,38 @@ def refine_prompt_v2():
 
 @app.route('/api/job_status/<job_id>')
 def job_status(job_id):
-    """Stream job status updates using Server-Sent Events"""
+    """Stream job status updates using Server-Sent Events for Celery tasks"""
     def generate():
-        job_queue = job_queues.get(job_id)
-        
-        if not job_queue:
-            yield f"data: {json.dumps({'error': 'Invalid job ID'})}\n\n"
-            return
+        job_manager = JobManager()
+        last_state = None
         
         while True:
             try:
-                # Check if job is complete
-                if job_id in jobs:
-                    job_info = jobs[job_id]
-                    if job_info.get('status') == 'completed':
-                        yield f"data: {json.dumps({'status': 'completed', 'result': job_info.get('result', {})})}\n\n"
-                        break
-                    elif job_info.get('status') == 'error':
-                        yield f"data: {json.dumps({'status': 'error', 'error': job_info.get('error', 'Unknown error')})}\n\n"
-                        break
+                # Get job status from Celery via JobManager
+                status = job_manager.get_job_status(job_id)
                 
-                # Get progress update from queue (with timeout)
-                update = job_queue.get(timeout=1.0)
-                yield f"data: {json.dumps(update)}\n\n"
+                # Only send update if state changed
+                if status['state'] != last_state:
+                    last_state = status['state']
+                    yield f"data: {json.dumps(status)}\n\n"
                 
-            except queue.Empty:
-                # Send heartbeat to keep connection alive
-                yield f"data: {json.dumps({'heartbeat': True})}\n\n"
+                # If job is complete, send result and finish
+                if status['state'] in ['SUCCESS', 'FAILURE']:
+                    result = job_manager.get_job_result(job_id)
+                    yield f"data: {json.dumps(result)}\n\n"
+                    break
+                
+                # Check for specific progress updates
+                if status['state'] == 'PROGRESS':
+                    yield f"data: {json.dumps(status)}\n\n"
+                
+                time.sleep(1)  # Poll every second
+                
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
                 break
-    
-    return Response(generate(), mimetype='text/event-stream')
+                
+    return Response(generate(), content_type='text/event-stream')
 
 @app.route('/api/check-session-repo', methods=['POST'])
 def check_session_repo():

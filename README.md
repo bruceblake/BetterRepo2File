@@ -1,6 +1,6 @@
-# BetterRepo2File (Vibe Coder)
+# BetterRepo2File v2.0 "RobustRepo" (Vibe Coder)
 
-An advanced web-based workflow for AI-assisted software development using Gemini for planning and Claude for implementation. This tool consolidates repository contents into optimized contexts for Large Language Models (LLMs), providing a structured workflow from idea to implementation.
+An advanced, scalable web-based workflow for AI-assisted software development using Gemini for planning and Claude for implementation. Version 2.0 introduces distributed processing with Celery, Redis-backed sessions, and MinIO object storage for enhanced scalability and robustness.
 
 ## 🚀 Quick Start
 
@@ -79,7 +79,19 @@ cd BetterRepo2File
 - Parallel file processing with worker threads
 - Comprehensive error handling and recovery
 
+### v2.0 "RobustRepo" Features
+- **Distributed Processing**: Celery task queue for scalable job processing
+- **Redis Session Management**: Fast, reliable session storage
+- **MinIO Object Storage**: Scalable file storage for distributed workers
+- **Enhanced Monitoring**: Celery Flower for task monitoring
+- **Improved Reliability**: Automatic retries and error recovery
+- **Better Resource Management**: Separate workers from web application
+- **OpenTelemetry Ready**: Infrastructure for distributed tracing (Phase 6)
+- **Production Ready**: Docker Compose deployment with health checks
+
 ## Installation
+
+### Option 1: Docker (Recommended for v2.0)
 
 1. Clone this repository:
    ```bash
@@ -87,13 +99,43 @@ cd BetterRepo2File
    cd BetterRepo2File
    ```
 
-2. Create a virtual environment (recommended):
+2. Start the services with Docker Compose:
+   ```bash
+   docker-compose up -d
+   ```
+
+3. Access the application at http://localhost:5000
+
+4. View service UIs:
+   - MinIO Console: http://localhost:9001 (minioadmin/minioadmin)
+   - Flower (Celery monitoring): http://localhost:5555
+
+### Option 2: Local Development
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/yourusername/BetterRepo2File.git
+   cd BetterRepo2File
+   ```
+
+2. Install Redis and MinIO locally:
+   ```bash
+   # For Ubuntu/Debian
+   sudo apt-get install redis-server
+   
+   # Download MinIO
+   wget https://dl.min.io/server/minio/release/linux-amd64/minio
+   chmod +x minio
+   ./minio server /data --console-address ":9001"
+   ```
+
+3. Create a virtual environment:
    ```bash
    python3 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-3. Install dependencies:
+4. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```

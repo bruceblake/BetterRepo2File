@@ -1,0 +1,326 @@
+<!-- LLM Context Generation Section -->
+<div class="step-card" id="llm-context-step">
+    <div class="step-header">
+        <span class="step-number">LLM</span>
+        <h2>LLM Context Generation</h2>
+    </div>
+    
+    <div class="step-content">
+        <!-- Task Selection -->
+        <div class="input-group">
+            <label for="llm-task-type">Task Type</label>
+            <select id="llm-task-type" class="select-input">
+                <option value="general">General Analysis</option>
+                <option value="code_review">Code Review</option>
+                <option value="debug">Debug</option>
+                <option value="documentation">Documentation</option>
+                <option value="refactor">Refactor</option>
+                <option value="security_audit">Security Audit</option>
+                <option value="explain_code">Explain Code</option>
+                <option value="generate_code">Generate Code</option>
+                <option value="optimize_performance">Optimize Performance</option>
+                <option value="migrate_code">Migrate Code</option>
+            </select>
+        </div>
+        
+        <!-- Model Selection -->
+        <div class="input-group">
+            <label for="llm-model">LLM Model</label>
+            <select id="llm-model" class="select-input">
+                <option value="gpt-4">GPT-4</option>
+                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                <option value="claude-3-opus">Claude 3 Opus</option>
+                <option value="claude-3-sonnet">Claude 3 Sonnet</option>
+                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+            </select>
+        </div>
+        
+        <!-- Token Budget -->
+        <div class="input-group">
+            <label for="llm-token-budget">Token Budget</label>
+            <input type="number" id="llm-token-budget" class="text-input" 
+                   placeholder="100000" value="100000">
+            <small class="input-hint">Maximum tokens for the context</small>
+        </div>
+        
+        <!-- Output Format -->
+        <div class="input-group">
+            <label for="llm-output-format">Output Format</label>
+            <select id="llm-output-format" class="select-input">
+                <option value="structured_text">Structured Text</option>
+                <option value="json">JSON</option>
+                <option value="yaml">YAML</option>
+                <option value="xml">XML</option>
+                <option value="markdown">Markdown</option>
+                <option value="code_blocks">Code Blocks</option>
+            </select>
+        </div>
+        
+        <!-- Focus Areas -->
+        <div class="input-group">
+            <label for="llm-focus-areas">Focus Areas (comma-separated)</label>
+            <input type="text" id="llm-focus-areas" class="text-input" 
+                   placeholder="e.g., auth, database, api">
+            <small class="input-hint">Specific files, folders, or patterns to focus on</small>
+        </div>
+        
+        <!-- Task Profiles -->
+        <div class="input-group">
+            <label>Quick Profiles</label>
+            <div class="profile-buttons">
+                <button class="profile-btn" onclick="loadLLMProfile('code_review')">
+                    <span class="material-symbols-outlined">code</span>
+                    Code Review
+                </button>
+                <button class="profile-btn" onclick="loadLLMProfile('bug_fixing')">
+                    <span class="material-symbols-outlined">bug_report</span>
+                    Bug Fixing
+                </button>
+                <button class="profile-btn" onclick="loadLLMProfile('documentation')">
+                    <span class="material-symbols-outlined">description</span>
+                    Documentation
+                </button>
+                <button class="profile-btn" onclick="loadLLMProfile('security_scan')">
+                    <span class="material-symbols-outlined">security</span>
+                    Security Scan
+                </button>
+            </div>
+        </div>
+        
+        <!-- Additional Options -->
+        <div class="input-group">
+            <label>Additional Options</label>
+            <div class="checkbox-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="llm-include-prompt">
+                    Include prompt template
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="llm-include-tests">
+                    Include test files
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="llm-semantic-analysis">
+                    Enable semantic analysis
+                </label>
+            </div>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div class="button-group">
+            <button class="secondary-btn" onclick="previewLLMContext()">
+                <span class="material-symbols-outlined">preview</span>
+                Preview Context
+            </button>
+            <button class="primary-btn" onclick="generateLLMContext()">
+                <span class="material-symbols-outlined">auto_awesome</span>
+                Generate LLM Context
+            </button>
+        </div>
+        
+        <!-- Preview Modal -->
+        <div id="llm-preview-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Context Preview</h3>
+                    <button class="close-btn" onclick="closeLLMPreview()">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="preview-stats">
+                        <div class="stat">
+                            <span class="stat-label">Estimated Tokens:</span>
+                            <span id="preview-tokens" class="stat-value">-</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Files Included:</span>
+                            <span id="preview-files" class="stat-value">-</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Total Files:</span>
+                            <span id="preview-total" class="stat-value">-</span>
+                        </div>
+                    </div>
+                    <pre id="preview-content" class="code-block"></pre>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Results Section -->
+        <div id="llm-results" class="result-section" style="display: none;">
+            <h3>Generated Context</h3>
+            <div class="result-stats">
+                <div class="stat">
+                    <span class="stat-label">Job ID:</span>
+                    <span id="llm-job-id" class="stat-value">-</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Status:</span>
+                    <span id="llm-status" class="stat-value">-</span>
+                </div>
+            </div>
+            <div class="result-actions">
+                <button class="action-btn" onclick="downloadLLMContext()">
+                    <span class="material-symbols-outlined">download</span>
+                    Download
+                </button>
+                <button class="action-btn" onclick="copyLLMContext()">
+                    <span class="material-symbols-outlined">content_copy</span>
+                    Copy
+                </button>
+                <button class="action-btn" onclick="viewLLMContext()">
+                    <span class="material-symbols-outlined">visibility</span>
+                    View
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* LLM Section Specific Styles */
+.profile-buttons {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.profile-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.875rem;
+}
+
+.profile-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+}
+
+.checkbox-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+}
+
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: var(--bg-primary);
+    border-radius: 0.75rem;
+    width: 90%;
+    max-width: 800px;
+    max-height: 80vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-body {
+    padding: 1.5rem;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+
+.preview-stats {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-radius: 0.5rem;
+}
+
+.stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.stat-label {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.stat-value {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.result-section {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: var(--bg-secondary);
+    border-radius: 0.5rem;
+}
+
+.result-stats {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 1.5rem;
+}
+
+.result-actions {
+    display: flex;
+    gap: 1rem;
+}
+
+.action-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.action-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+}
+</style>
