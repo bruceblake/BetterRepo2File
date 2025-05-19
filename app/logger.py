@@ -275,6 +275,19 @@ class ColoredFormatter(logging.Formatter):
 # Global logger instance
 iteration_logger = IterationLogger()
 
+# Module-level logger for direct import
+logger = logging.getLogger('betterrepo2file.app')
+logger.setLevel(logging.INFO)
+
+# Add console handler if not already configured
+if not logger.handlers:
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    ))
+    logger.addHandler(console_handler)
+
 # Convenience functions
 def log_iteration_start(iteration_id: str, description: str = ''):
     iteration_logger.start_iteration(iteration_id, description)

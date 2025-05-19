@@ -5,11 +5,24 @@ from typing import Any, Callable, Dict, Optional
 from contextlib import contextmanager
 
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 from opentelemetry.trace import Status, StatusCode
+
+# Try different import paths for OTLP exporter
+try:
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+except ImportError:
+    try:
+        from opentelemetry.exporter.otlp.proto.grpc import OTLPSpanExporter
+    except ImportError:
+        try:
+            from opentelemetry.exporter.otlp.trace_exporter import OTLPSpanExporter
+        except ImportError:
+            from opentelemetry.exporter.otlp import OTLPSpanExporter
+
+# Instrumentation imports
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.celery import CeleryInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
@@ -77,16 +90,24 @@ class TracingManager:
         try:
             # Flask instrumentation
             if app:
-                FlaskInstrumentor().instrument_app(app)
+                flask_instrumentor = FlaskInstrumentor()
+                if not flask_instrumentor.is_instrumented_by_opentelemetry:
+                    flask_instrumentor.instrument_app(app)
             
             # Celery instrumentation
-            CeleryInstrumentor().instrument()
+            celery_instrumentor = CeleryInstrumentor()
+            if not celery_instrumentor.is_instrumented_by_opentelemetry:
+                celery_instrumentor.instrument()
             
             # Redis instrumentation
-            RedisInstrumentor().instrument()
+            redis_instrumentor = RedisInstrumentor()
+            if not redis_instrumentor.is_instrumented_by_opentelemetry:
+                redis_instrumentor.instrument()
             
             # HTTP requests instrumentation
-            RequestsInstrumentor().instrument()
+            requests_instrumentor = RequestsInstrumentor()
+            if not requests_instrumentor.is_instrumented_by_opentelemetry:
+                requests_instrumentor.instrument()
             
         except Exception as e:
             print(f"Warning: Failed to instrument some libraries: {e}")

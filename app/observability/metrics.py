@@ -4,10 +4,21 @@ from typing import Dict, Any, Optional, Callable
 from contextlib import contextmanager
 
 from opentelemetry import metrics
-from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader, ConsoleMetricExporter
 from opentelemetry.sdk.resources import Resource
+
+# Try different import paths for OTLP metric exporter
+try:
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+except ImportError:
+    try:
+        from opentelemetry.exporter.otlp.proto.grpc import OTLPMetricExporter
+    except ImportError:
+        try:
+            from opentelemetry.exporter.otlp.metric_exporter import OTLPMetricExporter
+        except ImportError:
+            from opentelemetry.exporter.otlp import OTLPMetricExporter
 
 from app.config import Config
 

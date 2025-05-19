@@ -24,6 +24,7 @@ opentelemetry-instrumentation-requests==0.42b0
 opentelemetry-instrumentation-logging==0.42b0
 opentelemetry-exporter-otlp==1.21.0
 opentelemetry-exporter-otlp-proto-grpc==1.21.0
+protobuf>=3.20
 flower==2.0.1
 python-json-logger==2.0.7
 python-dotenv==1.0.0

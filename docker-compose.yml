@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   redis:
     image: redis:7-alpine
@@ -66,6 +64,12 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   celery:
@@ -141,6 +145,46 @@ services:
       - DOCKER_HOST=unix:///var/run/docker.sock
     profiles:
       - test-docker
+
+  # E2E Test Runner Service for Playwright
+  e2e-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.playwright
+    container_name: betterrepo2file-e2e-tests
+    depends_on:
+      app:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      celery:
+        condition: service_started
+    environment:
+      - BASE_URL=http://app:5000
+      - HEADLESS=${PLAYWRIGHT_HEADLESS:-true}
+      - PYTEST_TIMEOUT=300
+      - CI=${CI:-false}
+    volumes:
+      - ./tests_e2e:/app/tests_e2e
+      - ./page_objects:/app/page_objects
+      - ./playwright-report:/app/playwright-report
+      - ./test-results:/app/test-results
+      - ./traces:/app/traces
+      - ./allure-results:/app/allure-results
+    networks:
+      - default
+    profiles:
+      - e2e
+    command: >
+      sh -c "
+        ./scripts/wait-for-app.sh &&
+        pytest tests_e2e/ 
+        --base-url=http://app:5000
+        --html=playwright-report/report.html
+        --self-contained-html
+        "
 
 volumes:
   redis_data:

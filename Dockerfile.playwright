@@ -1,0 +1,67 @@
+# Dockerfile.playwright
+# E2E testing environment for RobustRepo with Playwright
+
+# Start with a base Python image matching the app's version
+FROM python:3.11-slim-bookworm
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Install system dependencies required by Playwright browsers
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    libnss3 \
+    libnspr4 \
+    libdbus-glib-1-2 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libatspi2.0-0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libxshmfence1 \
+    libx11-xcb1 \
+    libxcb1 \
+    # Clean up apt caches to reduce image size
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy test requirements
+COPY requirements-test.txt ./
+
+# Install Python test dependencies
+RUN pip install --no-cache-dir -r requirements-test.txt
+
+# Install Playwright browsers
+RUN playwright install chromium --with-deps
+RUN playwright install firefox --with-deps
+
+# Create directory structure for tests
+RUN mkdir -p tests_e2e page_objects test-results playwright-report traces
+
+# Copy test files - create directories first to ensure they exist
+RUN mkdir -p tests_e2e page_objects
+
+COPY tests_e2e/ ./tests_e2e/
+COPY page_objects/ ./page_objects/
+COPY pytest.ini ./pytest.ini
+
+# Copy Playwright configuration
+COPY playwright.config.py ./playwright.config.py
+
+# Create scripts directory and copy scripts
+RUN mkdir -p scripts
+COPY scripts/wait-for-app.sh ./scripts/wait-for-app.sh
+COPY scripts/run-e2e-tests.sh ./scripts/run-e2e-tests.sh
+RUN chmod +x ./scripts/wait-for-app.sh ./scripts/run-e2e-tests.sh
+
+# Default command - can be overridden in docker-compose.yml
+CMD ["./scripts/run-e2e-tests.sh"]
